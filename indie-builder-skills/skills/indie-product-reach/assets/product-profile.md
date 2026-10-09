@@ -1,0 +1,27 @@
+# Product profile
+
+- Product name:
+- Official URL:
+- One-sentence positioning:
+- Product type:
+- Core problem solved:
+- Primary audience:
+- Main use cases:
+- Differentiators:
+- Pricing/free tier:
+- Current stage:
+- Main growth goal:
+- Target geography/language:
+- Existing channels:
+- Existing assets:
+- Analytics/search tools:
+- Budget preference:
+- Time available per week:
+- Known competitors:
+- Email list status:
+- Social proof available (testimonials, reviews, case studies):
+- AI search visibility (known mentions in ChatGPT/Perplexity/etc.):
+- Developer community presence (GitHub, HN, Dev.to, etc.):
+- Chinese market presence:
+- Constraints and unknowns:
+- Last updated:

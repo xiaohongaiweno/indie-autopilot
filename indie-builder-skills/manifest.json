@@ -1,0 +1,70 @@
+{
+  "package": "Indie Builder Skills",
+  "version": "2.0.0",
+  "skill_count": 31,
+  "phases": [
+    {
+      "phase": "discovery",
+      "title": "Discovery & Research",
+      "skills": ["indie-product-radar", "emerging-keyword-radar", "product-validation", "competitor-intelligence", "seo-opportunity-research"]
+    },
+    {
+      "phase": "definition",
+      "title": "Definition & Design",
+      "skills": ["product-positioning", "mvp-scope-planner", "product-requirements", "product-ux-conversion"]
+    },
+    {
+      "phase": "build",
+      "title": "Build",
+      "skills": ["indie-tech-architecture", "ai-coding-workflow", "security-privacy-review"]
+    },
+    {
+      "phase": "launch",
+      "title": "Launch",
+      "skills": ["launch-readiness-qa", "deployment-operations", "launch-campaign-planner"]
+    },
+    {
+      "phase": "growth",
+      "title": "Growth",
+      "skills": ["indie-product-reach", "content-marketing-engine", "distribution-channel-research", "google-indexing-diagnostics", "product-analytics", "conversion-optimization", "pricing-monetization", "customer-feedback-loop"]
+    },
+    {
+      "phase": "maintain",
+      "title": "Maintain & Review",
+      "skills": ["product-lifecycle-manager", "project-retrospective", "saas-cost-monitor", "technical-debt-manager", "indie-builder-memory", "support-knowledge-base", "indie-workflow-automation", "skills-quality-auditor"]
+    }
+  ],
+  "skills": [
+    { "name": "indie-product-radar", "priority": "P0", "title": "独立开发者产品雷达", "phase": "discovery" },
+    { "name": "emerging-keyword-radar", "priority": "P1", "title": "新兴关键词雷达", "phase": "discovery" },
+    { "name": "product-validation", "priority": "P0", "title": "产品需求验证", "phase": "discovery" },
+    { "name": "competitor-intelligence", "priority": "P0", "title": "竞品情报分析", "phase": "discovery" },
+    { "name": "seo-opportunity-research", "priority": "P0", "title": "SEO 搜索机会研究", "phase": "discovery" },
+    { "name": "product-positioning", "priority": "P0", "title": "产品定位与差异化", "phase": "definition" },
+    { "name": "mvp-scope-planner", "priority": "P0", "title": "MVP 范围规划", "phase": "definition" },
+    { "name": "product-requirements", "priority": "P0", "title": "产品需求与 PRD", "phase": "definition" },
+    { "name": "product-ux-conversion", "priority": "P1", "title": "产品 UX 与转化体验", "phase": "definition" },
+    { "name": "indie-tech-architecture", "priority": "P0", "title": "独立开发者技术架构", "phase": "build" },
+    { "name": "ai-coding-workflow", "priority": "P0", "title": "AI 辅助编码工作流", "phase": "build" },
+    { "name": "security-privacy-review", "priority": "P1", "title": "安全与隐私审查", "phase": "build" },
+    { "name": "launch-readiness-qa", "priority": "P0", "title": "上线准备与质量验收", "phase": "launch" },
+    { "name": "deployment-operations", "priority": "P1", "title": "部署与运维流程", "phase": "launch" },
+    { "name": "launch-campaign-planner", "priority": "P1", "title": "产品发布活动规划", "phase": "launch" },
+    { "name": "indie-product-reach", "priority": "P0", "title": "增长编排层", "phase": "growth" },
+    { "name": "content-marketing-engine", "priority": "P1", "title": "内容营销引擎", "phase": "growth" },
+    { "name": "distribution-channel-research", "priority": "P1", "title": "分发渠道研究", "phase": "growth" },
+    { "name": "google-indexing-diagnostics", "priority": "P1", "title": "Google 收录诊断", "phase": "growth" },
+    { "name": "product-analytics", "priority": "P0", "title": "产品分析与增长指标", "phase": "growth" },
+    { "name": "conversion-optimization", "priority": "P1", "title": "转化率优化", "phase": "growth" },
+    { "name": "pricing-monetization", "priority": "P1", "title": "定价与商业化", "phase": "growth" },
+    { "name": "customer-feedback-loop", "priority": "P1", "title": "用户反馈与产品迭代", "phase": "growth" },
+    { "name": "product-lifecycle-manager", "priority": "P1", "title": "产品生命周期管理", "phase": "maintain" },
+    { "name": "project-retrospective", "priority": "P1", "title": "项目复盘", "phase": "maintain" },
+    { "name": "saas-cost-monitor", "priority": "P1", "title": "SaaS 成本监控", "phase": "maintain" },
+    { "name": "technical-debt-manager", "priority": "P2", "title": "技术债管理", "phase": "maintain" },
+    { "name": "indie-builder-memory", "priority": "P0", "title": "独立开发经验记忆", "phase": "maintain" },
+    { "name": "support-knowledge-base", "priority": "P2", "title": "用户支持知识库", "phase": "maintain" },
+    { "name": "indie-workflow-automation", "priority": "P2", "title": "独立开发工作流自动化", "phase": "maintain" },
+    { "name": "skills-quality-auditor", "priority": "P1", "title": "Skills 质量审查", "phase": "maintain" }
+  ]
+}
