@@ -5,17 +5,104 @@ on:
       project_id:
         description: "Project ID to validate"
         required: true
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
   issues: write
 
 concurrency:
-  group: validate-${{ github.event.inputs.project_id }}
+  group: validate-${{ github.event.inputs.project_id || format('opp-{0}', github.event.issue.number) }}
   cancel-in-progress: false
 
+env:
+  PROJECT_ID: ${{ github.event.inputs.project_id || format('opp-{0}', github.event.issue.number) }}
+
 jobs:
+  init-project:
+    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'opportunity')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Create project state from issue
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const issueNumber = context.issue.number;
+            const projectId = `opp-${issueNumber}`;
+            const projectDir = path.join('projects', projectId);
+            fs.mkdirSync(projectDir, { recursive: true });
+
+            const rawTitle = context.payload.issue.title;
+            const name = rawTitle.replace(/^\[Opportunity\]\s*/, '').substring(0, 120);
+
+            const now = new Date().toISOString();
+            const state = {
+              project_id: projectId,
+              name: name,
+              stage: "discovered",
+              status: "active",
+              created_at: now,
+              updated_at: now,
+              approved_stages: [],
+              artifacts: {},
+              next_action: `Auto-triggered validation from issue #${issueNumber}`,
+              last_run: null,
+              audit_log: [{
+                timestamp: now,
+                action: "project_created",
+                actor: "github-actions",
+                details: `Created from issue #${issueNumber}: ${rawTitle}`
+              }]
+            };
+
+            fs.writeFileSync(
+              path.join(projectDir, 'state.json'),
+              JSON.stringify(state, null, 2) + '\n'
+            );
+
+            core.exportVariable('PROJECT_ID', projectId);
+
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+
+      - name: Validate project state
+        run: |
+          python scripts/validate_artifact.py \
+            --schema schemas/project.schema.json \
+            --artifact "projects/${{ env.PROJECT_ID }}/state.json"
+
+      - name: Commit project state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "projects/${{ env.PROJECT_ID }}/"
+          git commit -m "Initialize project ${{ env.PROJECT_ID }} from issue #${{ github.event.issue.number }}" || echo "Nothing to commit"
+          git push
+
+      - name: Acknowledge issue
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Validation workflow started!\n\n- **Project ID**: \`opp-${context.issue.number}\`\n- **Workflow**: [View run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\nI'll create an approval Issue when validation completes.`
+            });
+
   pre-check:
+    needs: init-project
+    if: always() && (needs.init-project.result == 'success' || needs.init-project.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -28,7 +115,7 @@ jobs:
       - name: Check transition validity
         run: |
           python scripts/check_transition.py \
-            --project-dir "projects/${{ github.event.inputs.project_id }}" \
+            --project-dir "projects/${{ env.PROJECT_ID }}" \
             --to-stage validating
 
   validate:
@@ -46,21 +133,25 @@ jobs:
         run: |
           python adapters/mock_agent.py \
             --stage validation \
-            --project-id "${{ github.event.inputs.project_id }}" \
-            --output-dir "projects/${{ github.event.inputs.project_id }}/research/"
+            --project-id "${{ env.PROJECT_ID }}" \
+            --output-dir "projects/${{ env.PROJECT_ID }}/research/"
       - name: Validate output
         run: |
           python scripts/validate_artifact.py \
             --schema schemas/stage-result.schema.json \
-            --artifact "projects/${{ github.event.inputs.project_id }}/research/mock-validation-result.json"
+            --artifact "projects/${{ env.PROJECT_ID }}/research/mock-validation-result.json"
       - name: Create approval issue
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
         with:
           script: |
+            const projectId = process.env.PROJECT_ID;
+            const issueTitle = context.payload.issue
+              ? context.payload.issue.title
+              : projectId;
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Approval needed: Validate ${{ github.event.inputs.project_id }}`,
-              body: `## Validation Results\n\nProject: ${{ github.event.inputs.project_id }}\n\nReview the research artifacts and approve or request changes.\n\n- [ ] Evidence is sufficient\n- [ ] Risks are acceptable\n- [ ] Next steps are clear\n\nRespond with /approve or /reject`,
+              title: `Approval needed: Validate ${projectId}`,
+              body: `## Validation Results\n\nProject: ${projectId}\nSource: ${issueTitle}\n\nReview the research artifacts and approve or request changes.\n\n- [ ] Evidence is sufficient\n- [ ] Risks are acceptable\n- [ ] Next steps are clear\n\nRespond with /approve or /reject`,
               labels: ['approval', 'validation']
             });
