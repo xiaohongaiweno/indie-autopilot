@@ -239,7 +239,39 @@ def run_checks(strict: bool = False) -> list[dict]:
     for var in ("SERPAPI_KEY", "AHREFS_API_KEY", "REDDIT_CLIENT_ID"):
         results.append(_check_env_var(var))
 
+    results.append(_check_google_credentials())
+
     return results
+
+
+def _check_google_credentials() -> dict:
+    """Is the Search Console / GA4 service-account key present and readable?
+
+    The value is a file path, so existence is the useful signal -- but the path
+    itself is still not echoed, to keep the check uniform with the others.
+    """
+    name = "Env: GOOGLE_APPLICATION_CREDENTIALS"
+    value = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not value:
+        return {
+            "name": name,
+            "category": "optional",
+            "status": "WARN",
+            "detail": "not set (needed only for `autopilot metrics`)",
+        }
+    if not os.path.isfile(value):
+        return {
+            "name": name,
+            "category": "optional",
+            "status": "WARN",
+            "detail": "set, but the file does not exist",
+        }
+    return {
+        "name": name,
+        "category": "optional",
+        "status": "PASS",
+        "detail": "set (key file present)",
+    }
 
 
 def _format_table(results: list[dict]) -> str:

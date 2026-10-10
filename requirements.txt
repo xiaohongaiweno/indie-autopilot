@@ -1,3 +1,6 @@
 jsonschema>=4.20.0
 pyyaml>=6.0
 pytest>=7.4.0
+# Real feedback data (Search Console + GA4). Imported lazily, so the rest of the
+# pipeline works without it; only `autopilot metrics` needs it.
+google-auth>=2.0.0

@@ -43,17 +43,35 @@ sources:
     mode: mock
     notes: "Requires search API (SerpAPI, Brave Search, etc.)"
 
+  # --- Real feedback data (used by `autopilot metrics`) ---------------------
+  #
+  # These two are what close the loop: GSC reports what Google showed and
+  # whether anyone clicked; GA4 reports what happened after they arrived.
+  #
+  # Authentication is a Google service account (no browser flow, no expiring
+  # refresh token). Set GOOGLE_APPLICATION_CREDENTIALS to the JSON key path in
+  # .env, or let `autopilot metrics` prompt you for it on first use.
+  #
+  # `site_url` and `property_id` are per-product, so leave them null here and
+  # either let the command prompt you (it saves to projects/<id>/metrics.yml) or
+  # set them there directly.
   analytics:
     enabled: false
-    provider: null
-    api_key_env: null
+    provider: google_analytics_4
+    credentials_env: GOOGLE_APPLICATION_CREDENTIALS
+    property_id: null          # e.g. "properties/123456789"
+    lookback_days: 28
     mode: mock
-    notes: "Google Analytics, Plausible, or similar"
+    notes: "GA4 Data API. Service account must be added as a Viewer on the property."
 
   search_console:
     enabled: false
-    credentials_env: null
+    provider: google_search_console
+    credentials_env: GOOGLE_APPLICATION_CREDENTIALS
+    site_url: null             # e.g. "sc-domain:example.com" or "https://example.com/"
+    lookback_days: 28
     mode: mock
+    notes: "Search Console API. Service account must be added as a Full user on the property."
 
   deployment:
     enabled: false

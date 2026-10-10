@@ -26,6 +26,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import orchestrator as orch  # noqa: E402
 import radar  # noqa: E402
 import deploy  # noqa: E402
+import metrics  # noqa: E402
 from state_machine import State  # noqa: E402
 
 PROJECTS_DIR = REPO_ROOT / "projects"
@@ -281,6 +282,36 @@ def cmd_deploy_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_metrics(args: argparse.Namespace) -> int:
+    """Fetch real Search Console / GA4 data and register it for the growth stage."""
+    project_dir = _resolve_project(args.project)
+
+    if args.dry_run:
+        print(metrics.describe_config(project_dir))
+        print("\n（dry-run：未调用任何 API）")
+        return 0
+
+    report = metrics.collect(project_dir, days=args.days)
+    print()
+    print(metrics.describe_report(report))
+
+    state = orch.load_state(project_dir)
+    latest = metrics.record_metrics(project_dir, state, report)
+    orch.save_state(project_dir, state)
+
+    print(f"\n已登记为产物：{latest.relative_to(project_dir)}")
+    if report.get("is_real_data"):
+        print("下游 growth 阶段的任务书会自动带上这些真实数据。")
+        print(f"  下一步：./autopilot.py run {project_dir.name} --adapter skill")
+        return 0
+
+    print(
+        "\n没有取到任何真实数据，因此没有被当作真实反馈。\n"
+        "  检查配置：./autopilot.py metrics <project> --dry-run"
+    )
+    return 1
+
+
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
@@ -373,6 +404,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_dstatus.add_argument("project")
     p_dstatus.set_defaults(func=cmd_deploy_status)
 
+    p_metrics = sub.add_parser(
+        "metrics", help="fetch real Search Console / GA4 data (closes the loop)"
+    )
+    p_metrics.add_argument("project")
+    p_metrics.add_argument(
+        "--days", type=int, default=None, help="lookback window (default from config)"
+    )
+    p_metrics.add_argument(
+        "--dry-run", action="store_true", help="show what is configured, call no APIs"
+    )
+    p_metrics.set_defaults(func=cmd_metrics)
+
     return parser
 
 
@@ -389,7 +432,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return args.func(args)
-    except (orch.PipelineError, radar.RadarError) as exc:
+    except (orch.PipelineError, radar.RadarError, metrics.MetricsError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

@@ -570,7 +570,113 @@ URL, timestamp, the exact command, and up to ten previous deployments.
 
 ---
 
-## 10. Troubleshooting
+## 10. Closing the loop: real Search Console / GA4 data
+
+Everything upstream of `growing` is a guess. This is where the pipeline reads
+what actually happened: what Google showed, whether anyone clicked, and what
+they did after arriving.
+
+```bash
+./autopilot.py metrics my-product --dry-run   # show config, call no APIs
+./autopilot.py metrics my-product             # fetch, store, register
+./autopilot.py metrics my-product --days 7    # shorter window
+```
+
+`metrics` registers the result as a `metrics` artifact, so the **next growth run
+inlines real data into its brief**:
+
+```bash
+./autopilot.py metrics my-product
+./autopilot.py run my-product --adapter skill   # growth now sees real numbers
+```
+
+### One-time setup (the part that actually takes effort)
+
+Both APIs grant read access to a **service account**, which needs no browser
+flow and no expiring refresh token:
+
+1. <https://console.cloud.google.com> -> create/select a project
+2. Enable **Search Console API** and **Google Analytics Data API**
+3. IAM & Admin -> Service Accounts -> Create. Then Keys -> Add key -> JSON
+4. Grant it access at the property level, or every call returns 403:
+   - Search Console -> Settings -> Users and permissions -> add the service
+     account email as **Full**
+   - GA4 -> Admin -> Property access management -> add it as **Viewer**
+5. Point the pipeline at the JSON key:
+
+```bash
+# in .env (gitignored), or let `autopilot metrics` prompt you once
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+```
+
+`google-auth` is required for this step only; it is imported lazily, so the rest
+of the pipeline works without it. If it is missing you get an install hint
+rather than an import traceback.
+
+### Which site / property
+
+`config/sources.yml` says *how* to connect; `projects/<id>/metrics.yml` says
+*which* site, because that differs per product. The command prompts for
+anything missing and **saves it**, so you are asked once:
+
+```yaml
+# projects/my-product/metrics.yml
+search_console:
+  site_url: "sc-domain:example.com"      # or "https://example.com/"
+analytics:
+  property_id: "properties/123456789"
+```
+
+Then enable the sources globally:
+
+```yaml
+# config/sources.yml
+search_console:
+  enabled: true
+analytics:
+  enabled: true
+```
+
+### What it fetches
+
+| Source | Dimensions | Metrics |
+|---|---|---|
+| Search Console | `query`, and separately `page` | clicks, impressions, CTR, average position |
+| Analytics (GA4) | `sessionSourceMedium`, `landingPagePlusQueryString` | sessions, users |
+
+It fetches the current window **and the previous one of the same length**, so
+the report carries period-over-period deltas. CTR and position are
+impression-weighted, not averaged across rows — averaging them would let a
+one-impression query skew the picture.
+
+GSC data lags, so the window ends two days before today rather than including a
+half-populated final day.
+
+### Opportunities are computed, not guessed
+
+Two of the most actionable SEO facts are arithmetic, so the pipeline computes
+them rather than asking a model:
+
+| Type | Condition | Action |
+|---|---|---|
+| `striking_distance` | position 11-20, >=30 impressions | Build depth and internal links to push onto page one |
+| `low_ctr` | >=50 impressions, CTR < 2% | Rewrite the title and meta description |
+
+`striking_distance` wins when both apply, because ranking lifts impressions
+*and* clicks; the low CTR is then recorded under `also` instead of being
+duplicated. A query already ranking well with a healthy CTR is not flagged.
+
+### When there is no real data
+
+If sources are disabled, credentials are missing, or an API call fails, the
+report says so instead of inventing numbers: `mode: "unavailable"`,
+`is_real_data: false`, and the reason per source. `metrics` exits non-zero, and
+the artifact is registered as **not** real data — so nothing downstream can
+mistake a failure for feedback. A failure in one source does not lose the other.
+
+---
+
+## 11. Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
@@ -586,6 +692,10 @@ URL, timestamp, the exact command, and up to ten previous deployments.
 | `部署失败：...` and the project is still `release_pending` | Correct behaviour -- a failed deploy must not mark the project launched. Fix the cause and re-run `deploy`. |
 | npm cache `EPERM` errors | The sandbox blocks npm's cache writes. Run `deploy` outside a restricted sandbox, or install wrangler globally and set `AUTOPILOT_WRANGLER=wrangler`. |
 | `项目处于 'X'，不能部署` | Only `release_pending` (first deploy) and `launched` (redeploy) can be deployed. |
+| `缺少 Google 服务账号密钥` | Set `GOOGLE_APPLICATION_CREDENTIALS` in `.env`, or run interactively to be prompted. |
+| `权限不足（403）` | Add the service-account email to the property: Full in Search Console, Viewer in GA4. |
+| `未配置 search_console.site_url` | Let the command prompt you (it saves the answer), or write `projects/<id>/metrics.yml`. |
+| `没有取到任何真实数据` | Expected when sources are disabled or credentials are missing. Check with `metrics --dry-run`. |
 
 Useful diagnostic:
 
@@ -596,7 +706,7 @@ python scripts/check_transition.py --project-dir projects/my-product --to-stage 
 
 ---
 
-## 11. Version control (optional)
+## 12. Version control (optional)
 
 Nothing in the pipeline requires git. If you do use it, committing `state.json`
 alongside artifacts gives you a readable history and easy rollback, since the

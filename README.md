@@ -63,7 +63,10 @@ python scripts/validate_environment.py
 # 5. Deploy (runs automatically at the release gate too)
 ./autopilot.py deploy my-first-product
 
-# 6. Inspect progress at any time
+# 6. After launch, feed real results back in (Search Console / GA4)
+./autopilot.py metrics my-first-product
+
+# 7. Inspect progress at any time
 ./autopilot.py status my-first-product
 ./autopilot.py history my-first-product
 ```
@@ -236,6 +239,28 @@ falsely launched. Credentials are prompted for on first use and stored in `.env`
 Attaching a custom domain is a Cloudflare dashboard action, so the pipeline
 prints instructions and you record the result with `domain`. See
 [docs/local-usage.md](docs/local-usage.md#9-deploying-to-cloudflare).
+
+### Closing the loop
+
+Everything upstream of `growing` is a guess. `metrics` reads what actually
+happened -- impressions, clicks, click-through rate, average position, traffic
+sources -- straight from Google Search Console and GA4:
+
+```bash
+./autopilot.py metrics my-first-product --dry-run   # show what is configured
+./autopilot.py metrics my-first-product             # fetch and register
+./autopilot.py run my-first-product --adapter skill # growth now sees real data
+```
+
+The result is registered as a `metrics` artifact, so the next growth run inlines
+real numbers into its brief. Two SEO opportunities are **computed** rather than
+guessed by a model: queries ranking 11-20 (push onto page one) and queries with
+many impressions but under 2% CTR (rewrite the title).
+
+When credentials or configuration are missing, the report says
+`mode: "unavailable"` and `is_real_data: false` -- a failure is never passed off
+as feedback. See
+[docs/local-usage.md](docs/local-usage.md#10-closing-the-loop-real-search-console--ga4-data).
 
 Shortcut edges that skip a stage or a gate do not exist. To leave the path on
 purpose, use the audited escape hatch:
