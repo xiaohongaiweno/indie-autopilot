@@ -1,0 +1,10 @@
+{
+  "response": {
+    "status": "success",
+    "raw_output": "[MOCK] Generated discovery result for xiao",
+    "errors": [],
+    "duration_seconds": 0.371,
+    "mode": "mock",
+    "is_real_data": false
+  }
+}
