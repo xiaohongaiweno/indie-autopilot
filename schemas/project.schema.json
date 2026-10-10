@@ -1,0 +1,116 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Project",
+  "description": "Autopilot project state file",
+  "type": "object",
+  "required": [
+    "project_id",
+    "name",
+    "stage",
+    "status",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "discovered",
+        "researching",
+        "validation_pending",
+        "validating",
+        "validation_approved",
+        "planning",
+        "plan_approved",
+        "building",
+        "testing",
+        "release_pending",
+        "launched",
+        "growing",
+        "iterating",
+        "blocked",
+        "failed",
+        "paused",
+        "rejected"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "paused", "archived", "blocked"]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "approved_stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["stage", "approved_at", "approval_id"],
+        "properties": {
+          "stage": { "type": "string" },
+          "approved_at": { "type": "string", "format": "date-time" },
+          "approval_id": { "type": "string" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "hash": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "stage": { "type": "string" }
+        }
+      }
+    },
+    "next_action": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "last_run": {
+      "type": ["object", "null"],
+      "properties": {
+        "workflow": { "type": "string" },
+        "run_at": { "type": "string", "format": "date-time" },
+        "status": { "type": "string" },
+        "run_id": { "type": "string" }
+      }
+    },
+    "audit_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["timestamp", "action", "actor"],
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time" },
+          "action": { "type": "string" },
+          "actor": { "type": "string" },
+          "from_stage": { "type": "string" },
+          "to_stage": { "type": "string" },
+          "details": { "type": "string" }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

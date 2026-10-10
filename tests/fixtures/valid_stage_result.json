@@ -1,0 +1,45 @@
+{
+  "project_id": "example-product",
+  "stage": "discovery",
+  "status": "success",
+  "generated_at": "2026-10-09T12:00:00Z",
+  "summary": "[MOCK] Simulated discovery for 'example-product'. Identified 3 potential problem areas.",
+  "mode": "mock",
+  "is_real_data": false,
+  "evidence": [
+    {
+      "source_type": "simulated",
+      "claim": "Small-business owners spend 6+ hours/week on manual scheduling",
+      "evidence_type": "assumption",
+      "confidence": "unavailable",
+      "notes": "Simulated -- no real survey conducted"
+    }
+  ],
+  "assumptions": [
+    {
+      "statement": "Target users have basic technical literacy",
+      "risk_if_wrong": "Product may need more onboarding support",
+      "how_to_verify": "Conduct 10 user interviews with target segment"
+    }
+  ],
+  "risks": [
+    {
+      "description": "Market may be saturated with established players",
+      "severity": "high",
+      "mitigation": "Differentiate on simplicity and price"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "discovery-summary",
+      "path": "research/mock-discovery-result.json",
+      "type": "json"
+    }
+  ],
+  "next_actions": [
+    {
+      "action": "Conduct competitor analysis on top 5 alternatives",
+      "priority": "high"
+    }
+  ]
+}

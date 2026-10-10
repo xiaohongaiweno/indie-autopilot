@@ -1,0 +1,68 @@
+# Data sources configuration
+# All sources default to mock/unavailable until explicitly configured.
+
+sources:
+  google_trends:
+    enabled: false
+    api_key_env: null
+    mode: mock
+    notes: "Requires Google Trends API key or SerpAPI key"
+
+  keyword_research:
+    enabled: false
+    provider: null
+    api_key_env: null
+    mode: mock
+    notes: "Supports Ahrefs, SEMrush, or DataForSEO when configured"
+
+  github_trending:
+    enabled: false
+    mode: mock
+    notes: "Can use GitHub API without key for basic queries"
+
+  reddit:
+    enabled: false
+    api_key_env: null
+    mode: mock
+    notes: "Requires Reddit API credentials"
+
+  product_hunt:
+    enabled: false
+    api_key_env: null
+    mode: mock
+
+  hacker_news:
+    enabled: true
+    mode: live
+    notes: "Free Algolia API, no key required"
+
+  web_search:
+    enabled: false
+    provider: null
+    api_key_env: null
+    mode: mock
+    notes: "Requires search API (SerpAPI, Brave Search, etc.)"
+
+  analytics:
+    enabled: false
+    provider: null
+    api_key_env: null
+    mode: mock
+    notes: "Google Analytics, Plausible, or similar"
+
+  search_console:
+    enabled: false
+    credentials_env: null
+    mode: mock
+
+  deployment:
+    enabled: false
+    provider: null
+    api_key_env: null
+    mode: mock
+    notes: "Vercel, Cloudflare, Railway, etc."
+
+defaults:
+  mode: mock
+  is_real_data: false
+  unavailable_reason: "Source not configured. Set enabled: true and provide api_key_env."

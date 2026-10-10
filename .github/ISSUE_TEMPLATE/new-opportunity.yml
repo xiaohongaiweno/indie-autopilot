@@ -1,0 +1,39 @@
+name: "New Product Opportunity"
+description: "Submit a new product opportunity for evaluation"
+title: "[Opportunity] "
+labels: ["opportunity", "discovery"]
+body:
+  - type: input
+    id: opportunity_name
+    attributes:
+      label: "Opportunity Name"
+      description: "Short name for this opportunity"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: "Description"
+      description: "What is the opportunity? What problem does it solve?"
+    validations:
+      required: true
+  - type: textarea
+    id: target_audience
+    attributes:
+      label: "Target Audience"
+      description: "Who would use this?"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: "Evidence"
+      description: "What signals led you to this opportunity?"
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: "Urgency"
+      options:
+        - "Low - explore when free"
+        - "Medium - worth investigating soon"
+        - "High - time-sensitive window"

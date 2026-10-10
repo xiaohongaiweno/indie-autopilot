@@ -1,0 +1,50 @@
+name: "Release"
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        required: true
+      dry_run:
+        description: "Dry run only (no actual deployment)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  pre-release-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - name: Verify release approval
+        run: |
+          python scripts/check_transition.py \
+            --project-dir "projects/${{ github.event.inputs.project_id }}" \
+            --to-stage launched
+      - name: Block production release
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "::error::Production releases require explicit approval in workflow-policy.yml"
+          echo "::error::Set production_allowed: true after reviewing rollback plan"
+          exit 1
+
+  dry-run:
+    needs: pre-release-check
+    if: ${{ inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - run: echo "Dry run release for ${{ inputs.project_id }}"
+      - run: echo "In production, this would deploy to the configured environment"

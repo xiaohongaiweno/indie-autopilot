@@ -1,0 +1,40 @@
+# Opportunity scoring weights
+# Used by radar and validation stages to rank opportunities.
+
+scoring:
+  discovery:
+    market_signal:
+      weight: 0.20
+      description: "Evidence of demand from search trends, forums, social media"
+    competition_level:
+      weight: 0.15
+      description: "Inverse — lower competition scores higher"
+    monetization_potential:
+      weight: 0.20
+      description: "Clear path to revenue for indie developer"
+    technical_feasibility:
+      weight: 0.15
+      description: "Can one developer build MVP in reasonable time"
+    seo_opportunity:
+      weight: 0.15
+      description: "Organic traffic potential with low-competition keywords"
+    personal_fit:
+      weight: 0.15
+      description: "Alignment with developer skills and interests"
+
+  validation:
+    pain_severity:
+      weight: 0.25
+    willingness_to_pay:
+      weight: 0.25
+    market_size:
+      weight: 0.20
+    differentiation_possible:
+      weight: 0.15
+    time_to_revenue:
+      weight: 0.15
+
+thresholds:
+  discovery_min_score: 0.55
+  validation_min_score: 0.60
+  planning_min_score: 0.65

@@ -1,0 +1,66 @@
+name: "Validate: Opportunity Deep Dive"
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Project ID to validate"
+        required: true
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: validate-${{ github.event.inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  pre-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - name: Check transition validity
+        run: |
+          python scripts/check_transition.py \
+            --project-dir "projects/${{ github.event.inputs.project_id }}" \
+            --to-stage validating
+
+  validate:
+    needs: pre-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - name: Run validation agent
+        run: |
+          python adapters/mock_agent.py \
+            --stage validation \
+            --project-id "${{ github.event.inputs.project_id }}" \
+            --output-dir "projects/${{ github.event.inputs.project_id }}/research/"
+      - name: Validate output
+        run: |
+          python scripts/validate_artifact.py \
+            --schema schemas/stage-result.schema.json \
+            --artifact "projects/${{ github.event.inputs.project_id }}/research/mock-validation-result.json"
+      - name: Create approval issue
+        uses: actions/github-script@60a0d83039c74a4a1b18f8a3f1c5cf06c58a7f1c
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Approval needed: Validate ${{ github.event.inputs.project_id }}`,
+              body: `## Validation Results\n\nProject: ${{ github.event.inputs.project_id }}\n\nReview the research artifacts and approve or request changes.\n\n- [ ] Evidence is sufficient\n- [ ] Risks are acceptable\n- [ ] Next steps are clear\n\nRespond with /approve or /reject`,
+              labels: ['approval', 'validation']
+            });

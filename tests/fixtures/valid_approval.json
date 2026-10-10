@@ -1,0 +1,11 @@
+{
+  "approval_id": "appr-test-001",
+  "project_id": "example-product",
+  "stage": "validating",
+  "decision": "approved",
+  "approved_by": "test-user",
+  "approved_at": "2026-10-09T12:00:00Z",
+  "artifact_hash": "sha256-abcdef1234567890",
+  "source_event": "https://github.com/org/repo/issues/1",
+  "comment": "Looks good, proceed with validation."
+}

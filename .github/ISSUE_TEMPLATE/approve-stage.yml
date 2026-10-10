@@ -1,0 +1,37 @@
+name: "Stage Approval"
+description: "Request approval for a stage transition"
+title: "[Approval] "
+labels: ["approval"]
+body:
+  - type: input
+    id: project_id
+    attributes:
+      label: "Project ID"
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: "Stage"
+      options:
+        - validation
+        - planning
+        - release
+        - paid_service
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: "Summary of Results"
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: "Known Risks"
+  - type: textarea
+    id: budget
+    attributes:
+      label: "Budget Impact"
+      description: "Any cost implications?"

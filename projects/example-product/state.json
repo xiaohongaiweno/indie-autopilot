@@ -1,0 +1,20 @@
+{
+  "project_id": "example-product",
+  "name": "Example Product",
+  "stage": "discovered",
+  "status": "active",
+  "created_at": "2026-10-09T00:00:00Z",
+  "updated_at": "2026-10-09T00:00:00Z",
+  "approved_stages": [],
+  "artifacts": {},
+  "next_action": "Run discovery research",
+  "last_run": null,
+  "audit_log": [
+    {
+      "timestamp": "2026-10-09T00:00:00Z",
+      "action": "project_created",
+      "actor": "system",
+      "details": "Initial project creation"
+    }
+  ]
+}

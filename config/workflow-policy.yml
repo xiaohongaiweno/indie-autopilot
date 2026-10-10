@@ -1,0 +1,87 @@
+# Workflow execution policy
+# Controls which stages can auto-advance and which require approval.
+
+stages:
+  discovery:
+    auto_advance: true
+    approval_required: false
+    timeout_minutes: 30
+    retry_limit: 2
+
+  research:
+    auto_advance: true
+    approval_required: false
+    timeout_minutes: 60
+    retry_limit: 2
+
+  validation:
+    auto_advance: false
+    approval_required: true
+    approval_gate: "before_deep_validation"
+    timeout_minutes: 60
+    retry_limit: 1
+
+  planning:
+    auto_advance: false
+    approval_required: true
+    approval_gate: "before_mvp_commit"
+    timeout_minutes: 45
+    retry_limit: 1
+
+  building:
+    auto_advance: false
+    approval_required: true
+    approval_gate: "before_code_merge"
+    timeout_minutes: 120
+    retry_limit: 2
+
+  testing:
+    auto_advance: true
+    approval_required: false
+    timeout_minutes: 30
+    retry_limit: 3
+
+  release:
+    auto_advance: false
+    approval_required: true
+    approval_gate: "before_production_release"
+    timeout_minutes: 60
+    retry_limit: 1
+    production_allowed: false
+
+  growth:
+    auto_advance: true
+    approval_required: false
+    timeout_minutes: 30
+    retry_limit: 2
+
+approval_gates:
+  before_deep_validation:
+    description: "Before investing time in deep opportunity validation"
+    requires: ["research_summary", "evidence_files"]
+    risk_level: "low"
+
+  before_mvp_commit:
+    description: "Before committing to MVP scope, budget, and timeline"
+    requires: ["validation_result", "positioning_draft"]
+    risk_level: "medium"
+
+  before_code_merge:
+    description: "Before merging AI-generated code to main branch"
+    requires: ["test_results", "security_review"]
+    risk_level: "high"
+
+  before_production_release:
+    description: "Before deploying to production environment"
+    requires: ["release_checklist", "rollback_plan"]
+    risk_level: "critical"
+    production_allowed: false
+
+  before_paid_service:
+    description: "Before activating any paid service or increasing budget"
+    requires: ["cost_estimate", "budget_approval"]
+    risk_level: "high"
+
+concurrency:
+  max_parallel_runs_per_project: 1
+  cancel_in_progress: false

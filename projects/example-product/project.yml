@@ -1,0 +1,9 @@
+project_id: example-product
+name: "Example Product"
+description: "A sample project demonstrating the autopilot pipeline"
+stage: discovered
+status: active
+created_at: "2026-10-09T00:00:00Z"
+updated_at: "2026-10-09T00:00:00Z"
+approved_stages: []
+next_action: "Run discovery research"
