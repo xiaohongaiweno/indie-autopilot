@@ -29,7 +29,7 @@ indie-autopilot is a state-machine pipeline that orchestrates AI skills through 
 +--------------------------------------------------------------------+
 |  Logic Layer  (Scripts)                                            |
 |  state_machine.py | check_transition.py | validate_artifact.py    |
-|  create_issue.py | generate_report.py | validate_environment.py   |
+|  create_issue.py | report.py | validate_environment.py           |
 +--------------------------------------------------------------------+
          |
          v
@@ -72,7 +72,7 @@ The logic layer contains the core pipeline scripts.
 
 **`scripts/create_issue.py`** -- Creates GitHub Issues for approval requests and task tracking. Supports idempotency via `.issue-keys.json` marker files.
 
-**`scripts/generate_report.py`** -- Generates Markdown status reports from project state, including artifacts, evidence, risks, next actions, and audit log.
+**`scripts/report.py`** -- Generates Markdown reports from project state: pending gate, artifacts with real-vs-mock provenance, the real GSC/GA4 numbers, the test run, the deployment, approvals, and the audit timeline.
 
 **`scripts/validate_environment.py`** -- Checks that the runtime environment is properly configured (Python version, packages, directories, schemas, gh CLI).
 

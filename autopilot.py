@@ -28,6 +28,7 @@ import radar  # noqa: E402
 import deploy  # noqa: E402
 import metrics  # noqa: E402
 import verify  # noqa: E402
+import report  # noqa: E402
 from state_machine import State  # noqa: E402
 
 PROJECTS_DIR = REPO_ROOT / "projects"
@@ -107,6 +108,12 @@ def cmd_approve(args: argparse.Namespace) -> int:
     """Pre-grant an approval so a later `run` sails through that gate."""
     project_dir = _resolve_project(args.project)
     config = orch.load_config()
+
+    with orch.project_lock(project_dir):
+        return _approve_locked(project_dir, config, args)
+
+
+def _approve_locked(project_dir, config, args) -> int:
     state = orch.load_state(project_dir)
     target = args.stage
 
@@ -143,12 +150,20 @@ def cmd_list(args: argparse.Namespace) -> int:
     if not ids:
         print("(projects/ 下没有可识别的项目)")
         return 0
+    blocked = 0
     for pid in ids:
         try:
             state = orch.load_state(PROJECTS_DIR / pid)
-            print(f"{pid:16} {state.get('stage')}")
         except orch.PipelineError as exc:
-            print(f"{pid:16} <unreadable: {exc}>")
+            print(f"{pid:20} <unreadable: {exc}>")
+            continue
+        gate = report.pending_gate(state)
+        mark = f"⏸ {gate['gate']}" if gate else ""
+        if gate:
+            blocked += 1
+        print(f"{pid:20} {state.get('stage'):20} {mark}")
+    if blocked:
+        print(f"\n{blocked} 个项目在等你处理。看详情：./autopilot.py report <project>")
     return 0
 
 
@@ -225,13 +240,14 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     if stage == State.LAUNCHED:
         # Already launched: redeploy in place, no transition to record.
-        result = deploy.deploy_before_launch(
-            project_dir,
-            state,
-            assume_yes=args.yes,
-            environment=args.environment,
-        )
-        orch.save_state(project_dir, state)
+        with orch.project_lock(project_dir):
+            result = deploy.deploy_before_launch(
+                project_dir,
+                state,
+                assume_yes=args.yes,
+                environment=args.environment,
+            )
+            orch.save_state(project_dir, state)
         return 0 if result.ok else 1
 
     # release_pending: the registered pre-transition action deploys between the
@@ -246,6 +262,12 @@ def cmd_domain(args: argparse.Namespace) -> int:
     """Record the custom domain you attached by hand after deploying."""
     project_dir = _resolve_project(args.project)
     actor = orch.current_actor()
+
+    with orch.project_lock(project_dir):
+        return _domain_locked(project_dir, args, actor)
+
+
+def _domain_locked(project_dir, args, actor) -> int:
     deploy.record_domain(project_dir, args.domain, actor=actor)
 
     state = orch.load_state(project_dir)
@@ -296,9 +318,10 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     print()
     print(metrics.describe_report(report))
 
-    state = orch.load_state(project_dir)
-    latest = metrics.record_metrics(project_dir, state, report)
-    orch.save_state(project_dir, state)
+    with orch.project_lock(project_dir):
+        state = orch.load_state(project_dir)
+        latest = metrics.record_metrics(project_dir, state, report)
+        orch.save_state(project_dir, state)
 
     print(f"\n已登记为产物：{latest.relative_to(project_dir)}")
     if report.get("is_real_data"):
@@ -340,6 +363,22 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print()
         print(result.output_tail)
     return 0 if result.status == "passed" else 1
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    """One project in full, or every project at a glance."""
+    if args.all or not args.project:
+        text = report.portfolio_report()
+    else:
+        text = report.project_report(_resolve_project(args.project))
+
+    if args.output:
+        path = Path(args.output).expanduser()
+        path.write_text(text, encoding="utf-8")
+        print(f"已写入 {path}")
+    else:
+        print(text)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +493,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="show the detected command only"
     )
     p_verify.set_defaults(func=cmd_verify)
+
+    p_report = sub.add_parser(
+        "report", help="project overview, or all projects (markdown)"
+    )
+    p_report.add_argument("project", nargs="?", default=None)
+    p_report.add_argument("--all", action="store_true", help="every project at a glance")
+    p_report.add_argument("--output", default=None, help="write to a file instead")
+    p_report.set_defaults(func=cmd_report)
 
     return parser
 

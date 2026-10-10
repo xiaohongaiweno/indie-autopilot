@@ -66,9 +66,10 @@ python scripts/validate_environment.py
 # 6. After launch, feed real results back in (Search Console / GA4)
 ./autopilot.py metrics my-first-product
 
-# 7. Inspect progress at any time
-./autopilot.py status my-first-product
-./autopilot.py history my-first-product
+# 7. See the whole picture
+./autopilot.py report my-first-product   # full markdown report
+./autopilot.py report --all              # every project, and what is waiting
+./autopilot.py status my-first-product   # terse version
 ```
 
 See [docs/local-usage.md](docs/local-usage.md) for the full command reference.
@@ -136,7 +137,7 @@ indie-autopilot/
     state_machine.py       # State definitions and transition logic
     validate_artifact.py   # JSON Schema validation
     check_transition.py    # Standalone transition check
-    generate_report.py     # Markdown status report generator
+    report.py              # Project / portfolio markdown reports
     validate_environment.py  # Environment health checks
   tests/                   # Test suite
   requirements.txt         # Python dependencies
@@ -274,6 +275,23 @@ marked unverified rather than passing silently (`verify.require_tests: true`
 makes it fatal instead). The result is written to `testing/test-run.json` before
 the agent starts, so the brief it receives contains the real command, exit code
 and output.
+
+### Seeing where things stand
+
+`status` is terse; `report` is the full picture and leads with what is waiting
+for you — a project parked on an ungranted gate is the most actionable fact
+there is:
+
+```bash
+./autopilot.py report my-first-product   # gate, artifacts with real-vs-mock
+                                         # provenance, real numbers, code manifest
+./autopilot.py report --all              # portfolio view + what needs a decision
+./autopilot.py list                      # marks waiting projects with ⏸
+```
+
+Concurrent runs are safe: each state-mutating command takes an exclusive
+per-project lock, so two `run` invocations can no longer overwrite each other's
+`state.json`.
 
 ### Closing the loop
 

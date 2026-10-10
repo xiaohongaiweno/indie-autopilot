@@ -879,7 +879,67 @@ workflow tooling — none of which has a stage today).
 
 ---
 
-## 11. Troubleshooting
+## 11. Seeing where things stand
+
+`status` is terse. `report` is the full picture, in Markdown, and it is
+opinionated about ordering:
+
+```bash
+./autopilot.py report my-product     # one project in full
+./autopilot.py report --all          # every project at a glance
+./autopilot.py report my-product --output report.md
+```
+
+The project report leads with **what is waiting for you** — a project sitting on
+an ungranted gate is the most actionable fact there is, and nothing used to say
+so — then:
+
+| Section | Why it is there |
+|---|---|
+| 概览 | stage, status, timestamps |
+| 待办 | the pending gate, the exact `approve` command, and which requirements are ✅/❌ |
+| 产物 | every artifact with its **provenance**: `mock` artifacts are labelled "not evidence" |
+| 真实数据 | GSC clicks/impressions/CTR, period deltas, computed SEO opportunities, GA4 totals, the test run, the deployment URL and domain |
+| 代码 | the build stage's file manifest |
+| 批准记录 | who approved what, and through which gate |
+| 最近动态 | the audit timeline |
+
+The portfolio view flags waiting projects and counts real-data artifacts per
+project, so you can see at a glance which of several products needs a decision:
+
+```
+| 项目      | 阶段    | 待办                  | 真实数据 | 最近更新 |
+| `alpha`   | testing | ⏸ before_code_merge  | 3 项     | ...      |
+
+## 等待你处理
+- **alpha**：`before_code_merge`（testing → release_pending） → `./autopilot.py run alpha`
+```
+
+`./autopilot.py list` also marks waiting projects with `⏸`, which is the fastest
+way to answer "is anything blocked on me?".
+
+This replaces `scripts/generate_report.py`, which was left over from the GitHub
+flow and — after the move to a local driver — was no longer called by anything.
+
+### Concurrent runs
+
+Each state-mutating command takes an exclusive per-project lock
+(`projects/<id>/.lock`). Two runs on the same project no longer interleave:
+
+```
+$ ./autopilot.py run my-product    # in one terminal
+ERROR: 另一个 autopilot 进程正在操作 my-product（pid=1794 since=...）。
+  等它结束后重试；如果确认没有进程在跑，锁会随进程退出自动释放。
+```
+
+The lock is advisory and released by the kernel if the process dies, so a stale
+lock file is never a problem. The old GitHub workflows got this from
+`concurrency:` groups; locally nothing provided it and two runs could silently
+overwrite each other's `state.json`.
+
+---
+
+## 12. Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
@@ -906,6 +966,7 @@ workflow tooling — none of which has a stage today).
 | `not_configured` but you expected tests | The project declares no test command. See the detection table above; `verify --dry-run` shows what was found. |
 | `no_code` | There is no `app/` yet. A mock build produces none — build with a live adapter first. |
 | Re-entering `growing` seems to do nothing | It should now re-run; if it does not, check `--rerun`. The artifact is stale-by-design on a loop-back. |
+| `另一个 autopilot 进程正在操作 <project>` | Another run holds the project lock. Wait for it, or check nothing is still running. |
 
 Useful diagnostic:
 
@@ -916,7 +977,7 @@ python scripts/check_transition.py --project-dir projects/my-product --to-stage 
 
 ---
 
-## 12. Version control (optional)
+## 13. Version control (optional)
 
 Nothing in the pipeline requires git. If you do use it, committing `state.json`
 alongside artifacts gives you a readable history and easy rollback, since the

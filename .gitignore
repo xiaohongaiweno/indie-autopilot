@@ -37,3 +37,6 @@ tmp/
 
 # Node (if used for tooling)
 node_modules/
+
+# Runtime lock files
+*.lock

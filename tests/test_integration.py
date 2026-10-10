@@ -140,27 +140,26 @@ def test_blocked_check_does_not_mutate():
     assert sd == original
 
 
-# ---- 4. generate_report works on example project ---------------------------
+# ---- 4. report works on example project ------------------------------------
 
-def test_generate_report_on_example_project():
+def test_report_on_example_project():
     project_dir = os.path.join(ROOT, "projects", "example-product")
     if not os.path.isdir(project_dir):
         pytest.skip("example-product project not found")
 
     scripts_dir = os.path.join(ROOT, "scripts")
     result = subprocess.run(
-        [sys.executable, os.path.join(scripts_dir, "generate_report.py"),
+        [sys.executable, os.path.join(scripts_dir, "report.py"),
          "--project-dir", project_dir],
         capture_output=True, text=True,
     )
     assert result.returncode == 0
-    report = result.stdout
-    assert "Project Status Report" in report
-    assert "example-product" in report
-    assert "discovered" in report
+    text = result.stdout
+    assert "example-product" in text
+    assert "discovered" in text
 
 
-def test_generate_report_output_file():
+def test_report_output_file():
     project_dir = os.path.join(ROOT, "projects", "example-product")
     if not os.path.isdir(project_dir):
         pytest.skip("example-product project not found")
@@ -171,14 +170,13 @@ def test_generate_report_output_file():
 
     try:
         result = subprocess.run(
-            [sys.executable, os.path.join(scripts_dir, "generate_report.py"),
+            [sys.executable, os.path.join(scripts_dir, "report.py"),
              "--project-dir", project_dir, "--output", output_path],
             capture_output=True, text=True,
         )
         assert result.returncode == 0
         with open(output_path) as f:
-            report = f.read()
-        assert "Project Status Report" in report
+            assert "example-product" in f.read()
     finally:
         if os.path.isfile(output_path):
             os.unlink(output_path)

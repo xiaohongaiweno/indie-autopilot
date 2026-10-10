@@ -26,7 +26,9 @@ import json
 import logging
 import os
 import sys
+import fcntl
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -221,6 +223,72 @@ def load_adapter(config: PipelineConfig, name: str) -> AgentAdapter:
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Concurrency
+# ---------------------------------------------------------------------------
+
+#: Projects this *process* already holds the lock for. flock is per open-file
+#: description, so a second acquisition from the same process on a fresh fd
+#: would deadlock against itself; tracking it here makes nesting safe while
+#: still excluding other processes.
+_LOCKS_HELD: set[Path] = set()
+
+
+@contextmanager
+def project_lock(project_dir: Path | str):
+    """Exclusive per-project lock around any read-modify-write of state.json.
+
+    The old GitHub workflows serialised runs with `concurrency:` groups. Locally
+    two `autopilot run` invocations on one project could interleave and lose
+    each other's writes, silently.
+
+    The lock is advisory and released by the kernel if the process dies, so a
+    stale lock file is never a problem.
+    """
+    project_dir = Path(project_dir).resolve()
+    if project_dir in _LOCKS_HELD:
+        yield
+        return
+
+    lock_path = project_dir / ".lock"
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as exc:
+        raise PipelineError(f"无法创建锁文件 {lock_path}：{exc}") from exc
+
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            holder = ""
+            try:
+                holder = os.read(fd, 200).decode("utf-8", "replace").strip()
+            except OSError:
+                pass
+            raise PipelineError(
+                f"另一个 autopilot 进程正在操作 {project_dir.name}"
+                + (f"（{holder}）" if holder else "")
+                + "。\n  锁文件："
+                + str(lock_path)
+                + "\n  等它结束后重试；如果确认没有进程在跑，锁会随进程退出自动释放。"
+            ) from exc
+
+        _LOCKS_HELD.add(project_dir)
+        try:
+            os.ftruncate(fd, 0)
+            os.write(fd, f"pid={os.getpid()} since={utc_now()}\n".encode())
+            yield
+        finally:
+            _LOCKS_HELD.discard(project_dir)
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:  # pragma: no cover
+            pass
+        os.close(fd)
 
 
 #: Filenames the pipeline itself writes, which must never count as "the agent
@@ -720,6 +788,28 @@ def run(
     if not project_dir.is_dir():
         raise PipelineError(f"Project directory does not exist: {project_dir}")
 
+    with project_lock(project_dir):
+        return _run_locked(
+            project_dir,
+            target=target,
+            config=config,
+            adapter_name=adapter_name,
+            assume_yes=assume_yes,
+            rerun=rerun,
+            actor=actor,
+        )
+
+
+def _run_locked(
+    project_dir: Path,
+    *,
+    target: State | str | None = None,
+    config: PipelineConfig | None = None,
+    adapter_name: str = "mock",
+    assume_yes: bool = False,
+    rerun: bool = False,
+    actor: str | None = None,
+) -> RunResult:
     config = config or load_config()
     adapter = load_adapter(config, adapter_name)
     state = load_state(project_dir)
@@ -820,6 +910,18 @@ def force_move(
     actor: str | None = None,
 ) -> dict[str, Any]:
     """Deliberately jump to *to_stage*, bypassing gates. Always audited."""
+    project_dir = Path(project_dir)
+    with project_lock(project_dir):
+        return _force_move_locked(project_dir, to_stage, reason=reason, actor=actor)
+
+
+def _force_move_locked(
+    project_dir: Path | str,
+    to_stage: State | str,
+    *,
+    reason: str,
+    actor: str | None = None,
+) -> dict[str, Any]:
     project_dir = Path(project_dir)
     state = load_state(project_dir)
     target = State(to_stage)
