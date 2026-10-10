@@ -153,7 +153,7 @@ The state machine defines 17 states and 23 transitions.
                               |     |VALIDATION_PENDING|
                               |     +------------------+
                               |           |
-                              |     [approval: before_deep_validation]
+                              |     (ungated: opportunity approval covers it)
                               |           |
                               |           v
                               |     +-----------+
@@ -247,11 +247,11 @@ This means: to move from release_pending to launched, you need an approval recor
    - Output: research_result artifact
    - Transition: requires research_result artifact
 
-3. **Validation Approval** (validation_pending -> validating)
-   - Trigger: Human reviews research and approves
-   - Mechanism: GitHub Issue with "approval" label, approval record in state.json
-   - Gate: before_deep_validation
-   - Transition: requires approval record
+3. **Validation Entry** (validation_pending -> validating)
+   - Trigger: automatic
+   - Gate: none -- approving the opportunity (radar / project creation) is
+     already the decision to spend validation effort
+   - Transition: no approval required
 
 4. **Validation** (validating -> validation_approved)
    - Trigger: Deep validation complete
@@ -259,8 +259,13 @@ This means: to move from release_pending to launched, you need an approval recor
    - Output: validation_result artifact
    - Transition: requires validation_result artifact
 
-5. **Planning** (validation_approved -> planning -> plan_approved)
-   - Trigger: Validation passed
+5. **Design Approval** (validation_approved -> planning)
+   - Trigger: Human decides the validated opportunity is worth designing
+   - Gate: before_design
+   - Transition: requires approval for `planning`
+
+6. **Planning** (planning -> plan_approved)
+   - Trigger: Validation passed and design was approved
    - Adapter: planning adapter (calls mvp-scope-planner, product-requirements skills)
    - Output: plan_result artifact
    - Transition: requires plan_result artifact + approval (before_mvp_commit gate)

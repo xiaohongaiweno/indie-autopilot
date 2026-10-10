@@ -192,7 +192,7 @@ def test_create_issue_accepts_valid_labels():
 # ---- 6. State machine prevents skipping approval gates ---------------------
 
 def test_state_machine_prevents_skipping_approval():
-    """Cannot transition from validation_pending to validating without approval."""
+    """Cannot move from validation into planning without approval."""
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     from state_machine import check_transition
 
@@ -200,7 +200,7 @@ def test_state_machine_prevents_skipping_approval():
         "artifacts": {},
         "approved_stages": [],  # No approval!
     }
-    allowed, reasons = check_transition("validation_pending", "validating", state_data)
+    allowed, reasons = check_transition("validation_approved", "planning", state_data)
     assert not allowed
     assert any("Approval required" in r for r in reasons)
 

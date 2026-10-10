@@ -206,20 +206,36 @@ the audit log:
 
 ## 4. The canonical path
 
+Each stage runs its adapter on entry, producing the artifact the outgoing
+transition requires. Gates sit *on transitions*, so the ⏸ line is the boundary
+you must pass to reach the next state.
+
 ```
 discovered
-  -> researching          research adapter   -> artifact research_result
-  -> validation_pending
-  -> validating           ⏸ GATE before_deep_validation        (risk: low)
-  -> validation_approved  validation adapter -> artifact validation_result
-  -> planning             planning adapter   -> artifact plan_result
-  -> plan_approved        ⏸ GATE before_mvp_commit             (risk: medium)
-  -> building             building adapter   -> artifact build_result
-  -> testing              testing adapter    -> artifact test_result
-  -> release_pending      release adapter    -> artifact release_result
-  -> launched             ⏸ GATE before_production_release     (risk: critical)
-  -> growing              growth adapter     -> artifact growth_review
+  -> researching              run research adapter   -> research_result
+  -> validation_pending                                 (needs research_result)
+  -> validating               run validation adapter -> validation_result
+  -> validation_approved                                (needs validation_result)
+  ⏸ GATE before_design (medium)
+  -> planning                 run planning adapter   -> plan_result
+  ⏸ GATE before_mvp_commit (medium)                     (needs plan_result)
+  -> plan_approved
+  -> building                 run building adapter   -> build_result
+  -> testing                  run testing adapter    -> test_result
+  ⏸ GATE before_code_merge (high)                       (needs test_result)
+  -> release_pending          run release adapter    -> release_result
+  ⏸ GATE before_production_release (critical)
+  -> launched
+  -> growing                  run growth adapter     -> growth_review
 ```
+
+Entering validation is deliberately **ungated**: approving the opportunity
+itself (via `autopilot radar`) is already the decision to spend validation
+effort, so research and validation run back to back unattended.
+
+So there are **four decisions** between a validated opportunity and a launched
+product -- approve design, approve the build, review the code, approve the
+release -- plus the opportunity approval in front of all of them.
 
 `growing` is the default target. Beyond it, `growing <-> iterating` is a cycle
 (growth is recurring, not one-shot), so `run` stops there unless you ask for
@@ -234,16 +250,25 @@ genuinely need to skip ahead.
 
 | Gate | Transition | Risk | Approving stage value |
 |---|---|---|---|
-| `before_deep_validation` | `validation_pending -> validating` | low | `validating` |
+| `before_design` | `validation_approved -> planning` | medium | `planning` |
 | `before_mvp_commit` | `planning -> plan_approved` | medium | `plan_approved` |
+| `before_code_merge` | `testing -> release_pending` | high | `release_pending` |
 | `before_production_release` | `release_pending -> launched` | critical | `launched` |
+
+The "approving stage value" is the **target** stage -- what you pass to
+`autopilot approve --stage`. Note that `before_code_merge` (code review) sits on
+`testing -> release_pending` rather than `building -> testing` so that the
+reviewer has the test results in hand; that is also what the gate's own
+`requires: [test_result, security_review]` declares.
 
 There is one more gated transition, `failed -> discovered`, which requires
 approval before a failed project is reset.
 
 Gate metadata (description, risk level, required artifacts) comes from
 `config/workflow-policy.yml`; the gate *decisions* come from the state machine in
-`scripts/state_machine.py`. If you edit one, keep the other in mind.
+`scripts/state_machine.py`. If you edit one, keep the other in mind --
+`tests/test_state_machine.py::test_each_happy_path_gate_has_policy_metadata`
+fails if a gate exists without policy metadata.
 
 ---
 

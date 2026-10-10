@@ -168,15 +168,15 @@ def test_artifact_is_current_true_after_run(project, config):
 
 def test_grant_approval_shape_matches_check_transition():
     state = {"artifacts": {}, "approved_stages": []}
-    orch.grant_approval(state, State.VALIDATING, "before_deep_validation", "tester")
+    orch.grant_approval(state, State.PLANNING, "before_design", "tester")
 
     entry = state["approved_stages"][0]
-    assert entry["stage"] == "validating"
+    assert entry["stage"] == "planning"
     assert entry["approved_by"] == "tester"
-    assert entry["gate"] == "before_deep_validation"
+    assert entry["gate"] == "before_design"
 
     allowed, reasons = orch.sm.check_transition(
-        State.VALIDATION_PENDING, State.VALIDATING, state
+        State.VALIDATION_APPROVED, State.PLANNING, state
     )
     assert allowed, reasons
 
@@ -203,9 +203,14 @@ def test_run_reaches_default_target(project, config):
     # every stage's artifact is registered and present on disk
     for key, entry in state["artifacts"].items():
         assert (project / entry["path"]).is_file(), key
-    # the three gates were approved locally
+    # all four gates on the canonical path were approved locally
     approved = {e["stage"] for e in state["approved_stages"]}
-    assert approved == {"validating", "plan_approved", "launched"}
+    assert approved == {
+        "planning",          # before_design
+        "plan_approved",     # before_mvp_commit
+        "release_pending",   # before_code_merge
+        "launched",          # before_production_release
+    }
 
 
 def test_run_registers_artifact_required_by_next_transition(project, config):
@@ -247,9 +252,10 @@ def test_run_stops_at_gate_without_tty(project, config, monkeypatch):
     with pytest.raises(orch.PipelineError, match="not a TTY"):
         orch.run(project, config=config)
 
-    # state is left at the pending stage and no approval was invented
+    # research and validation ran unattended; the run stopped at the first gate
     state = orch.load_state(project)
-    assert state["stage"] == "validation_pending"
+    assert state["stage"] == "validation_approved"
+    assert set(state["artifacts"]) == {"research_result", "validation_result"}
     assert state["approved_stages"] == []
 
 
@@ -261,7 +267,7 @@ def test_run_rejection_leaves_stage_and_audits(project, config, monkeypatch):
 
     assert result.completed is False
     state = orch.load_state(project)
-    assert state["stage"] == "validation_pending"
+    assert state["stage"] == "validation_approved"
     assert state["approved_stages"] == []
     assert any(e["action"] == "approval_rejected" for e in state["audit_log"])
 
@@ -270,10 +276,100 @@ def test_run_approval_via_input(project, config, monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda *a: "y")
 
-    result = orch.run(project, target=State.VALIDATING, config=config)
-    assert result.reached == "validating"
+    result = orch.run(project, target=State.PLANNING, config=config)
+    assert result.reached == "planning"
     state = orch.load_state(project)
     assert any(e["action"] == "approval_granted" for e in state["audit_log"])
+
+
+#: Gates in the order a project meets them.
+GATE_ORDER = ["planning", "plan_approved", "release_pending", "launched"]
+
+#: gate target stage -> the stage the run should be sitting on when declined
+HAPPY_PATH_GATES = {
+    "planning": "validation_approved",         # before_design
+    "plan_approved": "planning",               # before_mvp_commit
+    "release_pending": "testing",              # before_code_merge
+    "launched": "release_pending",             # before_production_release
+}
+
+assert set(GATE_ORDER) == set(HAPPY_PATH_GATES)
+
+
+@pytest.mark.parametrize("declined,expected_stage", sorted(HAPPY_PATH_GATES.items()))
+def test_every_gate_can_stop_the_run(project, config, monkeypatch, declined, expected_stage):
+    """Pre-approve four gates, decline the fifth: the run must stop there."""
+    state = orch.load_state(project)
+    for stage in HAPPY_PATH_GATES:
+        if stage != declined:
+            orch.grant_approval(state, State(stage), None, "tester")
+    orch.save_state(project, state)
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda *a: "n")
+
+    result = orch.run(project, config=config)
+
+    assert result.completed is False
+    final = orch.load_state(project)
+    assert final["stage"] == expected_stage
+    assert declined not in {e["stage"] for e in final["approved_stages"]}
+    assert any(
+        e["action"] == "approval_rejected" and e["stage"] == declined
+        for e in final["audit_log"]
+    )
+
+
+@pytest.mark.parametrize("target", GATE_ORDER)
+def test_gates_up_to_a_target_can_all_be_pre_approved(project, config, monkeypatch, target):
+    """Pre-approving the gates on the way must suppress every prompt.
+
+    stdin is forced non-interactive, so any gate that still asked would raise
+    instead of silently succeeding.
+    """
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    state = orch.load_state(project)
+    for stage in GATE_ORDER[: GATE_ORDER.index(target) + 1]:
+        orch.grant_approval(state, State(stage), None, "tester")
+    orch.save_state(project, state)
+
+    result = orch.run(project, target=State(target), config=config)
+
+    assert result.completed is True
+    assert result.reached == target
+    # and the approvals were recognised, not duplicated
+    final = orch.load_state(project)
+    assert len(final["approved_stages"]) == GATE_ORDER.index(target) + 1
+
+
+def test_reaching_a_gate_target_still_runs_that_stage(project, config):
+    """`run --to release_pending` must execute the release stage, not just enter it."""
+    state = orch.load_state(project)
+    for stage in GATE_ORDER[: GATE_ORDER.index("release_pending") + 1]:
+        orch.grant_approval(state, State(stage), None, "tester")
+    orch.save_state(project, state)
+
+    orch.run(project, target=State.RELEASE_PENDING, config=config)
+
+    final = orch.load_state(project)
+    assert final["stage"] == "release_pending"
+    assert "test_result" in final["artifacts"]
+    assert "release_result" in final["artifacts"]
+
+
+def test_declining_a_gate_does_not_consume_later_stages(project, config, monkeypatch):
+    """A refusal must leave the project before the gate, not past it."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda *a: "n")
+
+    orch.run(project, config=config)
+
+    final = orch.load_state(project)
+    assert final["stage"] == "validation_approved"
+    # research and validation ran, nothing downstream did
+    assert set(final["artifacts"]) == {"research_result", "validation_result"}
+    assert final["approved_stages"] == []
 
 
 def test_run_self_heals_missing_artifact(project, config):

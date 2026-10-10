@@ -134,11 +134,11 @@ def test_check_transition_missing_artifact_reason():
 
 def test_check_transition_missing_approval_reason():
     sd = _make_state_data(
-        stage="validation_pending",
+        stage="validation_approved",
         artifacts={},
-        approved_stages=[],  # no approval for validating
+        approved_stages=[],  # no approval for planning
     )
-    allowed, reasons = check_transition("validation_pending", "validating", sd)
+    allowed, reasons = check_transition("validation_approved", "planning", sd)
     assert not allowed
     assert any("Approval required" in r for r in reasons)
 
@@ -165,23 +165,30 @@ def test_present_artifacts_allow():
 
 def test_missing_approval_blocks():
     sd = _make_state_data(
-        stage="validation_pending",
+        stage="validation_approved",
         artifacts={},
         approved_stages=[],
     )
-    allowed, reasons = check_transition("validation_pending", "validating", sd)
+    allowed, reasons = check_transition("validation_approved", "planning", sd)
     assert not allowed
     assert any("Approval required" in r for r in reasons)
 
 
 def test_present_approval_allows():
     sd = _make_state_data(
-        stage="validation_pending",
+        stage="validation_approved",
         artifacts={},
-        approved_stages=[{"stage": "validating"}],
+        approved_stages=[{"stage": "planning"}],
     )
-    allowed, reasons = check_transition("validation_pending", "validating", sd)
+    allowed, reasons = check_transition("validation_approved", "planning", sd)
     assert allowed, f"Expected allowed but got: {reasons}"
+
+
+def test_entering_validation_needs_no_approval():
+    """Approving the opportunity is the decision to validate; not a second gate."""
+    sd = _make_state_data(stage="validation_pending", artifacts={}, approved_stages=[])
+    allowed, reasons = check_transition("validation_pending", "validating", sd)
+    assert allowed, f"Expected validation to start unattended but got: {reasons}"
 
 
 # ---- 6. apply_transition updates audit_log ---------------------------------
@@ -284,8 +291,9 @@ def test_blocked_paused_are_not_terminal(state):
 # ---- 10. requires_approval -------------------------------------------------
 
 APPROVAL_TRANSITIONS = [
-    (State.VALIDATION_PENDING, State.VALIDATING),
+    (State.VALIDATION_APPROVED, State.PLANNING),
     (State.PLANNING, State.PLAN_APPROVED),
+    (State.TESTING, State.RELEASE_PENDING),
     (State.RELEASE_PENDING, State.LAUNCHED),
     (State.FAILED, State.DISCOVERED),
 ]
@@ -293,15 +301,50 @@ APPROVAL_TRANSITIONS = [
 NO_APPROVAL_TRANSITIONS = [
     (State.DISCOVERED, State.RESEARCHING),
     (State.RESEARCHING, State.VALIDATION_PENDING),
+    # Deliberately ungated: the radar approval is the decision to validate.
+    (State.VALIDATION_PENDING, State.VALIDATING),
     (State.VALIDATING, State.VALIDATION_APPROVED),
-    (State.VALIDATION_APPROVED, State.PLANNING),
     (State.PLAN_APPROVED, State.BUILDING),
     (State.BUILDING, State.TESTING),
-    (State.TESTING, State.RELEASE_PENDING),
     (State.LAUNCHED, State.GROWING),
     (State.GROWING, State.ITERATING),
     (State.ITERATING, State.GROWING),
 ]
+
+#: The gates a project must pass on the canonical path, in order. This is the
+#: human decision rhythm the pipeline is built around; changing it should be
+#: deliberate, and this test is where that deliberation is recorded.
+HAPPY_PATH_GATES = [
+    (State.VALIDATION_APPROVED, State.PLANNING, "before_design"),
+    (State.PLANNING, State.PLAN_APPROVED, "before_mvp_commit"),
+    (State.TESTING, State.RELEASE_PENDING, "before_code_merge"),
+    (State.RELEASE_PENDING, State.LAUNCHED, "before_production_release"),
+]
+
+
+def test_happy_path_gate_sequence_is_exact():
+    """Every gate on the canonical path, in order, with the right ids."""
+    actual = [
+        (src, dst, TRANSITIONS[(src, dst)].gate)
+        for (src, dst), cfg in TRANSITIONS.items()
+        if cfg.approval_required and src in HAPPY_PATH and dst in HAPPY_PATH
+    ]
+    assert sorted(actual) == sorted(HAPPY_PATH_GATES)
+
+
+def test_each_happy_path_gate_has_policy_metadata():
+    """A gate with no entry in workflow-policy.yml would prompt with no context."""
+    import yaml
+
+    policy = yaml.safe_load(
+        open(
+            os.path.join(os.path.dirname(SCRIPTS_DIR), "config", "workflow-policy.yml"),
+            encoding="utf-8",
+        ).read()
+    )
+    defined = policy.get("approval_gates") or {}
+    for _src, _dst, gate in HAPPY_PATH_GATES:
+        assert gate in defined, f"gate '{gate}' missing from workflow-policy.yml"
 
 
 @pytest.mark.parametrize("from_s,to_s", APPROVAL_TRANSITIONS)

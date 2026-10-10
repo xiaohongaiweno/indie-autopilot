@@ -19,19 +19,22 @@ This document defines the approval rules, mechanisms, and constraints.
 
 There are 6 approval gates in the pipeline. Each protects a specific decision point.
 
-### 1. before_deep_validation
+Note: entering validation (`validation_pending -> validating`) is deliberately
+**not** gated. Approving the opportunity itself -- via `autopilot radar`, or by
+creating the project -- is already the human decision to spend validation effort.
 
-**Location:** validation_pending -> validating
+### 1. before_design
 
-**Purpose:** Before investing time in deep opportunity validation, confirm the initial research is worth pursuing.
+**Location:** validation_approved -> planning
 
-**Risk level:** Low
+**Purpose:** Validation passed; decide whether the opportunity is worth investing design and MVP-scoping time in.
+
+**Risk level:** Medium
 
 **Required artifacts:**
-- research_summary
-- evidence_files
+- validation_result
 
-**What it protects:** Prevents wasting validation effort on opportunities that don't pass initial research review.
+**What it protects:** Prevents a validated-but-unattractive opportunity from consuming design effort. Without this gate the pipeline moved straight from "validation passed" into planning with no human in the loop.
 
 ### 2. before_mvp_commit
 
@@ -49,17 +52,17 @@ There are 6 approval gates in the pipeline. Each protects a specific decision po
 
 ### 3. before_code_merge
 
-**Location:** building -> testing (when merging AI-generated code)
+**Location:** testing -> release_pending (code review before the release path)
 
-**Purpose:** Before merging AI-generated code to the main branch, review test results and security.
+**Purpose:** Review the AI-generated code together with the test results before it moves toward release.
 
 **Risk level:** High
 
 **Required artifacts:**
-- test_results
+- test_result
 - security_review
 
-**What it protects:** Prevents unreviewed code from reaching production, catches security issues early.
+**What it protects:** Prevents unreviewed code from reaching production, catches security issues early. It sits after `testing` rather than after `building` so the reviewer has the test results in hand, which is what this gate declares it requires.
 
 ### 4. before_production_release
 

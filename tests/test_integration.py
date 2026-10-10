@@ -51,8 +51,8 @@ def test_happy_path_discovered_to_planning():
     sd = apply_transition("researching", "validation_pending", sd)
     assert sd["stage"] == "validation_pending"
 
-    # Step 3: validation_pending -> validating (needs approval)
-    sd["approved_stages"].append({"stage": "validating"})
+    # Step 3: validation_pending -> validating (ungated: the opportunity
+    # approval already authorised spending validation effort)
     allowed, reasons = check_transition("validation_pending", "validating", sd)
     assert allowed, f"validation_pending->validating blocked: {reasons}"
     sd = apply_transition("validation_pending", "validating", sd)
@@ -65,7 +65,12 @@ def test_happy_path_discovered_to_planning():
     sd = apply_transition("validating", "validation_approved", sd)
     assert sd["stage"] == "validation_approved"
 
-    # Step 5: validation_approved -> planning (auto)
+    # Step 5: validation_approved -> planning (HUMAN GATE: before_design)
+    allowed, reasons = check_transition("validation_approved", "planning", sd)
+    assert not allowed, "validation_approved->planning should need approval"
+    assert "Approval required" in " ".join(reasons)
+
+    sd["approved_stages"].append({"stage": "planning"})
     allowed, reasons = check_transition("validation_approved", "planning", sd)
     assert allowed, f"validation_approved->planning blocked: {reasons}"
     sd = apply_transition("validation_approved", "planning", sd)

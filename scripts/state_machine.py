@@ -101,8 +101,10 @@ TRANSITIONS: dict[tuple[State, State], TransitionConfig] = {
         failure_action="block",
     ),
     (S.VALIDATION_PENDING, S.VALIDATING): _tc(
-        approval_required=True,
-        gate="before_deep_validation",
+        # Not gated on purpose: approving the opportunity itself (via
+        # `autopilot radar`) is the human decision to spend validation effort.
+        # A second approval here was redundant with that.
+        auto=True,
         failure_action="block",
     ),
     (S.VALIDATING, S.VALIDATION_APPROVED): _tc(
@@ -110,7 +112,11 @@ TRANSITIONS: dict[tuple[State, State], TransitionConfig] = {
         failure_action="fail",
     ),
     (S.VALIDATION_APPROVED, S.PLANNING): _tc(
-        auto=True,
+        # The human decides whether the validated opportunity is worth
+        # investing design time in. Without this gate the pipeline moved
+        # straight from "validation passed" into planning unattended.
+        approval_required=True,
+        gate="before_design",
         failure_action="block",
     ),
     (S.PLANNING, S.PLAN_APPROVED): _tc(
@@ -128,7 +134,13 @@ TRANSITIONS: dict[tuple[State, State], TransitionConfig] = {
         failure_action="fail",
     ),
     (S.TESTING, S.RELEASE_PENDING): _tc(
+        # Code review sits here rather than at building->testing so the
+        # reviewer has the test results (and can ask for a security review)
+        # alongside the diff -- which is what before_code_merge declares it
+        # needs. It is the last stop before the release path.
         required_artifacts=["test_result"],
+        approval_required=True,
+        gate="before_code_merge",
         failure_action="fail",
     ),
     (S.RELEASE_PENDING, S.LAUNCHED): _tc(

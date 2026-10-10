@@ -1,5 +1,12 @@
 # Workflow execution policy
-# Controls which stages can auto-advance and which require approval.
+#
+# NOTE: the gates that are actually enforced live in scripts/state_machine.py
+# (TransitionConfig.approval_required / .gate). This file supplies the gate
+# *metadata* used to render the approval prompt (description, risk_level,
+# requires) and the per-stage timeout the orchestrator passes to the adapter.
+# The `auto_advance` / `approval_required` / `approval_gate` fields below are
+# descriptive documentation of the intended layout -- keep them in step with
+# state_machine.py, but do not expect them to gate anything on their own.
 
 stages:
   discovery:
@@ -17,27 +24,27 @@ stages:
   validation:
     auto_advance: false
     approval_required: true
-    approval_gate: "before_deep_validation"
+    approval_gate: "before_design"            # gate on leaving validation
     timeout_minutes: 60
     retry_limit: 1
 
   planning:
     auto_advance: false
     approval_required: true
-    approval_gate: "before_mvp_commit"
+    approval_gate: "before_mvp_commit"        # gate on leaving planning
     timeout_minutes: 45
     retry_limit: 1
 
   building:
-    auto_advance: false
-    approval_required: true
-    approval_gate: "before_code_merge"
+    auto_advance: true                        # building -> testing is automatic
+    approval_required: false
     timeout_minutes: 120
     retry_limit: 2
 
   testing:
-    auto_advance: true
-    approval_required: false
+    auto_advance: false
+    approval_required: true
+    approval_gate: "before_code_merge"        # gate on leaving testing
     timeout_minutes: 30
     retry_limit: 3
 
@@ -56,10 +63,10 @@ stages:
     retry_limit: 2
 
 approval_gates:
-  before_deep_validation:
-    description: "Before investing time in deep opportunity validation"
-    requires: ["research_summary", "evidence_files"]
-    risk_level: "low"
+  before_design:
+    description: "After validation passed, before investing design and MVP-scoping time"
+    requires: ["validation_result"]
+    risk_level: "medium"
 
   before_mvp_commit:
     description: "Before committing to MVP scope, budget, and timeline"
@@ -67,8 +74,8 @@ approval_gates:
     risk_level: "medium"
 
   before_code_merge:
-    description: "Before merging AI-generated code to main branch"
-    requires: ["test_results", "security_review"]
+    description: "Code review: after tests pass, before the release path"
+    requires: ["test_result", "security_review"]
     risk_level: "high"
 
   before_production_release:

@@ -185,18 +185,27 @@ canonical path, running each stage's adapter and pausing at every approval gate.
 
 ```
 discovered
-  -> researching          run research adapter, register research_result
+  -> researching              run research adapter, register research_result
   -> validation_pending
-  -> validating           ⏸ GATE before_deep_validation
-  -> validation_approved  run validation adapter, register validation_result
-  -> planning             run planning adapter, register plan_result
-  -> plan_approved        ⏸ GATE before_mvp_commit
-  -> building             run building adapter, register build_result
-  -> testing              run testing adapter, register test_result
-  -> release_pending      run release adapter, register release_result
-  -> launched             ⏸ GATE before_production_release
-  -> growing              run growth adapter, register growth_review
+  -> validating               run validation adapter, register validation_result
+  -> validation_approved
+  ⏸ GATE before_design
+  -> planning                 run planning adapter, register plan_result
+  ⏸ GATE before_mvp_commit
+  -> plan_approved
+  -> building                 run building adapter, register build_result
+  -> testing                  run testing adapter, register test_result
+  ⏸ GATE before_code_merge
+  -> release_pending          run release adapter, register release_result
+  ⏸ GATE before_production_release
+  -> launched
+  -> growing                  run growth adapter, register growth_review
 ```
+
+Entering validation is deliberately ungated: approving the opportunity itself is
+already the decision to spend validation effort, so research and validation run
+back to back. After that, four gates take it to launch -- approve design, approve
+the build, review the code, approve the release.
 
 Shortcut edges that skip a stage or a gate do not exist. To leave the path on
 purpose, use the audited escape hatch:
@@ -418,10 +427,13 @@ stages:
   validation:
     auto_advance: false        # Requires human approval
     approval_required: true
-    approval_gate: "before_deep_validation"
+    approval_gate: "before_design"
     timeout_minutes: 60
     retry_limit: 1
 ```
+
+The gate *decisions* live in `scripts/state_machine.py`; this file supplies the
+gate metadata used to render the approval prompt plus the per-stage timeout.
 
 ### sources.yml
 
