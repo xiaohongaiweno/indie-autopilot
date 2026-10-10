@@ -439,3 +439,109 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------
+# Release readiness
+# ---------------------------------------------------------------------------
+
+#: Test verdicts that are acceptable to release on. `not_configured` is only
+#: acceptable when require_tests is off -- it means nothing was verified.
+_RELEASABLE_TEST_STATUSES = ("passed",)
+
+
+def check_release_readiness(
+    project_dir: Path | str,
+    *,
+    state: dict[str, Any],
+    code_dir: Path | str,
+    config: dict[str, Any] | None = None,
+) -> VerifyResult:
+    """Preconditions for releasing: something to ship, and evidence it works.
+
+    `release_pending` was the one stage with no verification at all -- it ran a
+    release-checklist skill and accepted whatever came back. These checks are
+    the facts that make "ready to release" mean something:
+
+    * there is a product (a code directory with files),
+    * its tests actually ran and passed (or, if it declares none, that you have
+      said missing tests are acceptable),
+    * and the deployment target is detectable, so the release is not fiction.
+
+    A project with no code is reported as ``no_code`` rather than failed, for the
+    same reason as the testing stage: a mock build has no product, and the
+    deploy step will refuse it later anyway.
+    """
+    project_dir = Path(project_dir)
+    code_dir = Path(code_dir)
+    cfg = load_verify_config(config)
+    notes: list[str] = []
+
+    has_code, file_count = inspect_code_dir(code_dir)
+    if not has_code:
+        return VerifyResult(
+            status="no_code",
+            code_dir=str(code_dir),
+            notes=(
+                f"{code_dir} 里没有代码（{file_count} 个文件），没有可发布的产品。"
+                "mock 构建不会产出代码，所以这是预期情况；部署时也会如实拒绝。"
+            ),
+        )
+
+    problems: list[str] = []
+
+    # 1. Real, green tests behind it.
+    entry = (state.get("artifacts") or {}).get("test_run")
+    run_path = project_dir / entry["path"] if entry and entry.get("path") else None
+    run: dict[str, Any] = {}
+    if run_path and run_path.is_file():
+        try:
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            run = {}
+
+    test_status = run.get("status")
+    if not run:
+        problems.append(
+            "没有测试记录（testing/test-run.json）。testing 阶段没有跑过验证。"
+        )
+    elif test_status in _RELEASABLE_TEST_STATUSES:
+        notes.append(f"测试已通过（{run.get('command')}）")
+    elif test_status == "not_configured":
+        if cfg.get("require_tests"):
+            problems.append(
+                "项目没有声明测试命令，而 verify.require_tests 为 true：不能发布未经验证的代码。"
+            )
+        else:
+            notes.append(
+                "⚠️ 项目没有声明测试命令：本次发布**未经验证**"
+                "（若要求必须有测试，把 verify.require_tests 设为 true）"
+            )
+    else:
+        problems.append(
+            f"测试状态是 '{test_status}'，不是 'passed'：不能发布测试未通过的代码。"
+        )
+
+    # 2. Something actually deployable.
+    try:
+        from deploy import detect_target
+
+        target = detect_target(project_dir)
+        notes.append(f"部署目标可识别：{target.describe()}")
+    except Exception as exc:  # noqa: BLE001 - DeployError and friends
+        problems.append(f"没有可部署的内容：{exc}")
+
+    if problems:
+        return VerifyResult(
+            status="failed",
+            code_dir=str(code_dir),
+            notes="\n  ".join(problems),
+            is_real_data=bool(run),
+        )
+
+    return VerifyResult(
+        status="passed",
+        code_dir=str(code_dir),
+        notes="\n  ".join(notes),
+        is_real_data=True,
+    )

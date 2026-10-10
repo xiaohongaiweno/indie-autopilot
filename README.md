@@ -24,7 +24,7 @@ indie-autopilot is a state-machine pipeline that coordinates 31 specialized AI s
 +-------------------------------------------------------------------------------------------+
 |                              JSON Schemas & State Files                                  |
 |                                                                                          |
-|  project.schema.json  |  stage-result.schema.json  |  approval.schema.json  |  state.json |
+|  project.schema.json  |  stage-result.schema.json  |  radar-scan.schema.json |  state.json |
 +-------------------------------------------------------------------------------------------+
 ```
 
@@ -131,7 +131,6 @@ indie-autopilot/
   schemas/                 # JSON Schema definitions
     project.schema.json    # Project state file schema
     stage-result.schema.json  # Stage output schema
-    approval.schema.json   # Approval record schema
   scripts/                 # Core pipeline scripts
     orchestrator.py        # Pipeline engine (drives stages, gates, artifacts)
     state_machine.py       # State definitions and transition logic
@@ -373,10 +372,9 @@ google_trends:
   mode: live
 ```
 
-```bash
-# Trigger with live mode
-gh workflow run radar-weekly.yml -f project_id=my-product -f mock_mode=false
-```
+The live sources used by the pipeline today are the ones with real clients:
+`autopilot metrics` reads Search Console and GA4 (see below), and `autopilot
+radar` uses whichever web tools the agent you run it with has.
 
 Currently available live sources:
 - **Hacker News** -- free Algolia API, no key required (enabled by default)

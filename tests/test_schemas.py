@@ -1,6 +1,6 @@
 """Tests for JSON schema validation (test_schemas.py).
 
-Validates project, stage-result, and approval schemas against the
+Validates the project and stage-result schemas against the
 canonical schema files in schemas/.
 """
 
@@ -81,27 +81,3 @@ def test_stage_result_invalid_evidence_type_fails():
     errors = _validate("stage-result.schema.json", data)
     assert len(errors) > 0
     assert any("made_up" in e or "enum" in e.lower() for e in errors)
-
-
-# ---- approval.schema.json --------------------------------------------------
-
-def test_valid_approval_passes():
-    data = _load_fixture("valid_approval.json")
-    errors = _validate("approval.schema.json", data)
-    assert errors == [], f"Unexpected errors: {errors}"
-
-
-def test_approval_invalid_decision_fails():
-    data = _load_fixture("valid_approval.json")
-    data["decision"] = "maybe_later"
-    errors = _validate("approval.schema.json", data)
-    assert len(errors) > 0
-    assert any("maybe_later" in e or "enum" in e.lower() for e in errors)
-
-
-def test_approval_extra_properties_rejected():
-    data = _load_fixture("valid_approval.json")
-    data["injected_field"] = "evil"
-    errors = _validate("approval.schema.json", data)
-    assert len(errors) > 0
-    assert any("additional" in e.lower() or "injected" in e.lower() for e in errors)

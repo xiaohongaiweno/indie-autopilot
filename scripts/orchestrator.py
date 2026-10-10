@@ -29,7 +29,7 @@ import sys
 import fcntl
 from collections import deque
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -119,6 +119,7 @@ class PipelineConfig:
     adapters: dict[str, dict[str, str]]
     default_target: State
     policy: dict[str, Any]
+    retry: dict[str, Any] = field(default_factory=dict)
 
     def spec_for(self, stage: State | str) -> StageSpec | None:
         return self.stages.get(State(stage))
@@ -128,6 +129,17 @@ class PipelineConfig:
         entry = (self.policy.get("stages") or {}).get(agent_stage) or {}
         minutes = entry.get("timeout_minutes")
         return int(minutes) * 60 if minutes else 300
+
+    def retry_attempts(self) -> int:
+        """Total adapter attempts per stage, including the first.
+
+        Defaults to 1 -- no retry -- because every attempt is a real, usually
+        paid, agent call. Retrying is opt-in, not a silent default.
+        """
+        try:
+            return max(1, int(self.retry.get("max_attempts", 1)))
+        except (TypeError, ValueError):
+            return 1
 
     def gate_policy(self, gate_id: str | None) -> dict[str, Any]:
         if not gate_id:
@@ -190,6 +202,7 @@ def load_config(path: Path | str = DEFAULT_PIPELINE_CONFIG) -> PipelineConfig:
         adapters=raw.get("adapters") or {},
         default_target=default_target,
         policy=_load_yaml(WORKFLOW_POLICY),
+        retry=raw.get("retry") or {},
     )
 
 
@@ -436,6 +449,16 @@ def _artifact_path(project_dir: Path, spec: StageSpec, mode: str) -> tuple[Path,
     return abs_path, str(abs_path.relative_to(project_dir))
 
 
+#: Adapter error codes that mean "the agent never ran", as opposed to "the agent
+#: ran and produced something we do not accept".
+_RETRYABLE_CODES = frozenset({"BACKEND_ERROR", "NO_PAYLOAD"})
+
+
+def _is_retryable(response: Any) -> bool:
+    codes = {e.get("code") for e in (response.errors or []) if isinstance(e, dict)}
+    return bool(codes & _RETRYABLE_CODES)
+
+
 def _entered_stage_at(state: dict[str, Any], stage: State) -> str | None:
     """Timestamp of the transition that most recently moved us into *stage*."""
     for entry in reversed(state.get("audit_log") or []):
@@ -489,10 +512,16 @@ def _verify_before_stage(
     code_dir = project_dir / (spec.code_dir or "app")
     cfg = verify_mod.load_verify_config()
 
-    print(f"[{spec.stage.value}] 运行项目自带的测试 ...", flush=True)
-    result = verify_mod.run_verification(
-        project_dir, code_dir=code_dir, config={"verify": cfg}
-    )
+    if spec.verify == "release":
+        print(f"[{spec.stage.value}] 检查发布前置条件 ...", flush=True)
+        result = verify_mod.check_release_readiness(
+            project_dir, state=state, code_dir=code_dir, config={"verify": cfg}
+        )
+    else:
+        print(f"[{spec.stage.value}] 运行项目自带的测试 ...", flush=True)
+        result = verify_mod.run_verification(
+            project_dir, code_dir=code_dir, config={"verify": cfg}
+        )
     print("   " + verify_mod.describe(result).replace("\n", "\n   "))
 
     if spec.output_dir:
@@ -524,12 +553,14 @@ def _verify_before_stage(
 
     if result.status in ("failed", "timeout", "dependencies_missing", "error"):
         detail = result.output_tail.strip()[-1500:] if result.output_tail else result.notes
+        heading = (
+            "发布前置条件不满足" if spec.verify == "release" else "测试未通过"
+        )
         raise PipelineError(
-            f"测试未通过（{result.status}）：{' '.join(result.command or [])}\n"
+            f"{heading}（{result.status}）：{' '.join(result.command or [])}\n"
             f"  {result.notes}\n"
             f"{detail}\n"
-            f"  状态仍是 '{spec.stage.value}' 之前，修好后重跑即可；"
-            "测试红了不能进入代码检视。"
+            f"  状态仍是 '{spec.stage.value}' 之前，修好后重跑即可。"
         )
 
     if result.status == "not_configured" and cfg.get("require_tests"):
@@ -573,10 +604,31 @@ def execute_stage(
         code_dir=str(project_dir / spec.code_dir) if spec.code_dir else None,
     )
 
+    # Retry only infrastructure failures -- the agent never produced an answer,
+    # so nothing was accomplished and a retry is not duplicating work. A schema
+    # violation or a refusal is a real result and is never retried.
+    attempts = config.retry_attempts()
+    request.max_retries = max(0, attempts - 1)
     response = adapter.execute(request)
+    attempt = 1
+    while (
+        attempt < attempts
+        and response.status != "success"
+        and _is_retryable(response)
+    ):
+        print(
+            f"   ↻ {spec.agent_stage} 第 {attempt} 次尝试失败（"
+            f"{response.errors[0].get('code') if response.errors else 'unknown'}），"
+            f"重试（{attempt + 1}/{attempts}）...",
+            flush=True,
+        )
+        attempt += 1
+        response = adapter.execute(request)
+
     if response.status != "success" or response.stage_result is None:
         raise PipelineError(
-            f"Stage '{spec.agent_stage}' failed: status={response.status} "
+            f"Stage '{spec.agent_stage}' failed after {attempt} attempt(s): "
+            f"status={response.status} "
             f"errors={response.errors or response.raw_output}"
         )
 

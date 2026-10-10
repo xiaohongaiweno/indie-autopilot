@@ -56,7 +56,12 @@ class StageRequest:
     allowed_read_paths: list[str]
     expected_output_schema: str  # path to schema file
     timeout_seconds: int = 300
-    max_retries: int = 2
+    #: Hint from the orchestrator: additional attempts it may make after an
+    #: infrastructure failure. The orchestrator owns the retry *policy* (see
+    #: `retry.max_attempts` in config/pipeline.yaml) and sets this before calling
+    #: `execute`; adapters should not retry on their own, or a policy of "no
+    #: retry" could still spend several paid agent calls.
+    max_retries: int = 0
     #: Directory the adapter may use for scratch/handoff files. The orchestrator
     #: sets this to the stage's output directory; backends that need somewhere
     #: to write a task brief rely on it.
@@ -102,8 +107,9 @@ class AgentAdapter(ABC):
     def execute(self, request: StageRequest) -> AgentResponse:
         """Run *request* and return the agent's response.
 
-        Implementations should respect ``request.timeout_seconds`` and retry
-        up to ``request.max_retries`` times on transient failures.
+        Implementations should respect ``request.timeout_seconds``. Retrying is
+        the orchestrator's decision, not the adapter's -- see
+        ``StageRequest.max_retries``.
         """
 
     @abstractmethod

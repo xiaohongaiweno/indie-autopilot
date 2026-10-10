@@ -996,3 +996,225 @@ def test_entered_stage_at_uses_the_most_recent_entry(project):
     assert orch._entered_stage_at(state, State.GROWING) == "t3"
     assert orch._entered_stage_at(state, State.ITERATING) == "t2"
     assert orch._entered_stage_at(state, State.BUILDING) is None
+
+
+# ---------------------------------------------------------------------------
+# 12. Adapter retries
+# ---------------------------------------------------------------------------
+
+
+class FlakyAdapter:
+    """Fails with a given error code for the first N calls, then succeeds."""
+
+    def __init__(self, fails, code="BACKEND_ERROR"):
+        self.fails = fails
+        self.code = code
+        self.calls = 0
+
+    def name(self):
+        return "flaky"
+
+    def health_check(self):
+        return True
+
+    def execute(self, request):
+        from adapters.adapter_interface import AgentResponse
+
+        self.calls += 1
+        if self.calls <= self.fails:
+            return AgentResponse(
+                status="failed",
+                stage_result=None,
+                raw_output="",
+                errors=[{"message": "boom", "code": self.code}],
+                mode="live",
+                is_real_data=False,
+            )
+        return AgentResponse(
+            status="success",
+            stage_result={
+                "project_id": "proj-test",
+                "stage": "research",
+                "status": "success",
+                "generated_at": "2026-01-01T00:00:00Z",
+                "summary": "ok",
+            },
+            raw_output="",
+            mode="live",
+            is_real_data=True,
+        )
+
+
+def with_attempts(config, attempts):
+    from dataclasses import replace
+
+    return replace(config, retry={"max_attempts": attempts})
+
+
+def test_no_retry_by_default(project, config):
+    """Every attempt is a real, usually paid, agent call -- opt in to retry."""
+    assert config.retry_attempts() == 1
+    adapter = FlakyAdapter(fails=1)
+    with pytest.raises(orch.PipelineError, match="after 1 attempt"):
+        orch.execute_stage(
+            project, orch.load_state(project), config.spec_for(State.RESEARCHING), adapter, config
+        )
+    assert adapter.calls == 1
+
+
+def test_infrastructure_failure_is_retried_when_configured(project, config):
+    adapter = FlakyAdapter(fails=2)
+    rel = orch.execute_stage(
+        project,
+        orch.load_state(project),
+        config.spec_for(State.RESEARCHING),
+        adapter,
+        with_attempts(config, 3),
+    )
+    assert adapter.calls == 3
+    assert rel.endswith("research-result.json")
+
+
+def test_retries_are_exhausted_and_reported(project, config):
+    adapter = FlakyAdapter(fails=99)
+    with pytest.raises(orch.PipelineError, match="after 3 attempt"):
+        orch.execute_stage(
+            project,
+            orch.load_state(project),
+            config.spec_for(State.RESEARCHING),
+            adapter,
+            with_attempts(config, 3),
+        )
+    assert adapter.calls == 3
+
+
+def test_schema_failures_are_never_retried(project, config):
+    """The agent ran and produced an answer; retrying just spends money again."""
+    adapter = FlakyAdapter(fails=99, code="SCHEMA")
+    with pytest.raises(orch.PipelineError):
+        orch.execute_stage(
+            project,
+            orch.load_state(project),
+            config.spec_for(State.RESEARCHING),
+            adapter,
+            with_attempts(config, 3),
+        )
+    assert adapter.calls == 1
+
+
+def test_retry_attempts_reads_config():
+    from dataclasses import replace
+
+    config = orch.load_config()
+    assert replace(config, retry={}).retry_attempts() == 1
+    assert replace(config, retry={"max_attempts": 4}).retry_attempts() == 4
+    # nonsense must not crash the pipeline
+    assert replace(config, retry={"max_attempts": "x"}).retry_attempts() == 1
+    assert replace(config, retry={"max_attempts": 0}).retry_attempts() == 1
+
+
+def test_max_retries_hint_is_passed_to_the_adapter(project, config):
+    """The request field must reflect the orchestrator's policy."""
+    seen = {}
+
+    class Recorder(FlakyAdapter):
+        def execute(self, request):
+            seen["max_retries"] = request.max_retries
+            return super().execute(request)
+
+    orch.execute_stage(
+        project,
+        orch.load_state(project),
+        config.spec_for(State.RESEARCHING),
+        Recorder(fails=0),
+        with_attempts(config, 3),
+    )
+    assert seen["max_retries"] == 2
+
+
+# ---------------------------------------------------------------------------
+# 13. Release stage verification
+# ---------------------------------------------------------------------------
+
+
+def test_release_stage_blocks_when_tests_are_red(tmp_path, config):
+    """release_pending used to have no verification at all."""
+    project = tmp_path / "rel"
+    (project / "app").mkdir(parents=True)
+    (project / "app" / "wrangler.toml").write_text('name = "x"\n')
+    (project / "testing").mkdir()
+    (project / "testing" / "test-run.json").write_text(
+        json.dumps({"status": "failed", "command": ["npm", "test"]})
+    )
+    (project / "state.json").write_text(
+        json.dumps(
+            {
+                "project_id": "rel",
+                "name": "R",
+                "stage": "testing",
+                "status": "active",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "approved_stages": [],
+                "artifacts": {"test_run": {"path": "testing/test-run.json"}},
+                "audit_log": [],
+            }
+        )
+    )
+    state = orch.load_state(project)
+    spec = config.spec_for(State.RELEASE_PENDING)
+    adapter = FakeLiveAdapter(
+        {
+            "project_id": "rel",
+            "stage": "release",
+            "status": "success",
+            "generated_at": "2026-01-01T00:00:00Z",
+            "summary": "清单",
+        }
+    )
+
+    with pytest.raises(orch.PipelineError, match="发布前置条件不满足"):
+        orch.execute_stage(project, state, spec, adapter, config)
+
+    assert adapter.requests == []
+    assert "release_result" not in state.get("artifacts", {})
+
+
+def test_release_stage_passes_with_green_tests(tmp_path, config):
+    project = tmp_path / "rel-ok"
+    (project / "app").mkdir(parents=True)
+    (project / "app" / "wrangler.toml").write_text('name = "x"\n')
+    (project / "testing").mkdir()
+    (project / "testing" / "test-run.json").write_text(
+        json.dumps({"status": "passed", "command": ["npm", "test"]})
+    )
+    (project / "state.json").write_text(
+        json.dumps(
+            {
+                "project_id": "rel-ok",
+                "name": "R",
+                "stage": "testing",
+                "status": "active",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "approved_stages": [],
+                "artifacts": {"test_run": {"path": "testing/test-run.json"}},
+                "audit_log": [],
+            }
+        )
+    )
+    state = orch.load_state(project)
+    adapter = FakeLiveAdapter(
+        {
+            "project_id": "rel-ok",
+            "stage": "release",
+            "status": "success",
+            "generated_at": "2026-01-01T00:00:00Z",
+            "summary": "清单",
+        }
+    )
+
+    orch.execute_stage(project, state, config.spec_for(State.RELEASE_PENDING), adapter, config)
+
+    assert len(adapter.requests) == 1
+    assert "release_result" in state["artifacts"]

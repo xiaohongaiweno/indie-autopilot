@@ -362,3 +362,105 @@ def test_really_runs_a_failing_pytest_suite(tmp_path):
     assert result.status == "failed"
     assert result.exit_code != 0
     assert "test_bad" in result.output_tail
+
+
+# ---------------------------------------------------------------------------
+# 6. Release readiness
+# ---------------------------------------------------------------------------
+
+
+def release_project(tmp_path, *, code=True, deployable=True, test=None, name="rel"):
+    project = tmp_path / name
+    (project / "app").mkdir(parents=True)
+    if code:
+        (project / "app" / "index.js").write_text("console.log(1)")
+    if deployable:
+        (project / "app" / "wrangler.toml").write_text('name = "x"\n')
+    state = {"artifacts": {}}
+    if test is not None:
+        (project / "testing").mkdir(parents=True)
+        (project / "testing" / "test-run.json").write_text(json.dumps(test))
+        state["artifacts"]["test_run"] = {"path": "testing/test-run.json"}
+    return project, state
+
+
+def check_release(project, state, **config):
+    return verify.check_release_readiness(
+        project,
+        state=state,
+        code_dir=project / "app",
+        config={"verify": config} if config else None,
+    )
+
+
+def test_release_without_code_is_not_a_failure(tmp_path):
+    """A mock build has no product; deploy will refuse it later anyway."""
+    project, state = release_project(tmp_path, code=False, deployable=False)
+    result = check_release(project, state)
+    assert result.status == "no_code"
+    assert result.ok is True
+
+
+def test_release_requires_a_test_run(tmp_path):
+    project, state = release_project(tmp_path, test=None)
+    result = check_release(project, state)
+    assert result.status == "failed"
+    assert "没有测试记录" in result.notes
+
+
+def test_release_accepts_green_tests_and_a_deployable_target(tmp_path):
+    project, state = release_project(
+        tmp_path, test={"status": "passed", "command": ["npm", "test"]}
+    )
+    result = check_release(project, state)
+    assert result.status == "passed"
+    assert "测试已通过" in result.notes
+    assert "部署目标可识别" in result.notes
+
+
+def test_release_refuses_red_tests(tmp_path):
+    project, state = release_project(
+        tmp_path, test={"status": "failed", "command": ["npm", "test"], "exit_code": 1}
+    )
+    result = check_release(project, state)
+    assert result.status == "failed"
+    assert "不能发布测试未通过的代码" in result.notes
+
+
+@pytest.mark.parametrize("status", ["timeout", "no_code", "dependencies_missing", "error"])
+def test_release_refuses_every_non_passing_test_status(tmp_path, status):
+    project, state = release_project(tmp_path, test={"status": status})
+    result = check_release(project, state)
+    assert result.status == "failed"
+    assert status in result.notes
+
+
+def test_release_refuses_when_nothing_is_deployable(tmp_path):
+    project, state = release_project(
+        tmp_path, deployable=False, test={"status": "passed"}
+    )
+    result = check_release(project, state)
+    assert result.status == "failed"
+    assert "没有可部署的内容" in result.notes
+
+
+def test_release_allows_unverified_only_when_permitted(tmp_path):
+    """No declared tests is a warning by default, and fatal when required."""
+    project, state = release_project(tmp_path, test={"status": "not_configured"})
+
+    lenient = check_release(project, state)
+    assert lenient.status == "passed"
+    assert "未经验证" in lenient.notes
+
+    strict = check_release(project, state, require_tests=True)
+    assert strict.status == "failed"
+    assert "require_tests" in strict.notes
+
+
+def test_release_readiness_is_wired_to_the_release_stage():
+    import yaml
+
+    cfg = yaml.safe_load((REPO_ROOT / "config" / "pipeline.yaml").read_text())
+    stage = cfg["stages"]["release_pending"]
+    assert stage["verify"] == "release"
+    assert stage["code_dir"] == "app"

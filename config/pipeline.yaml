@@ -71,6 +71,12 @@ stages:
     agent_stage: release
     output_dir: release
     artifact_key: release_result
+    # This was the one stage with no verification: it ran a checklist skill and
+    # accepted the result. These are the facts that make "ready to release"
+    # mean something -- a product exists, its tests really passed, and the
+    # deployment target is detectable.
+    code_dir: app
+    verify: release
     description: "Release checklist and rollback plan"
 
   growing:
@@ -220,6 +226,15 @@ default_backend: handoff
 #   pytest config or tests/     -> python -m pytest
 #   Makefile `test:` target     -> make test
 # If nothing is declared the run is reported as UNVERIFIED (not as a pass).
+# Adapter retries. Default is 1 (no retry) because every attempt is a real,
+# usually paid, agent call -- retrying is a choice, not a silent default.
+#
+# Only infrastructure failures are retried: a backend that could not run, or
+# produced no parseable payload. A schema violation or an agent refusal is a
+# real result and is never retried.
+retry:
+  max_attempts: 1
+
 verify:
   timeout_seconds: 600
   # Installing a generated project's dependencies is what you would do by hand

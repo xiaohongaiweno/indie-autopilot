@@ -14,8 +14,8 @@ indie-autopilot is a state-machine pipeline that orchestrates AI skills through 
 ```
 +--------------------------------------------------------------------+
 |  Orchestration Layer  (GitHub Actions)                             |
-|  radar-weekly | validate-opportunity | plan-product | build-and-   |
-|  test | release | growth-review                                    |
+|  autopilot.py: radar | run | status | report | deploy | metrics    |
+|  scripts/orchestrator.py drives stages, gates and artifacts         |
 +--------------------------------------------------------------------+
          |
          v
@@ -29,13 +29,13 @@ indie-autopilot is a state-machine pipeline that orchestrates AI skills through 
 +--------------------------------------------------------------------+
 |  Logic Layer  (Scripts)                                            |
 |  state_machine.py | check_transition.py | validate_artifact.py    |
-|  create_issue.py | report.py | validate_environment.py           |
+|  report.py | deploy.py | metrics.py | verify.py | radar.py      |
 +--------------------------------------------------------------------+
          |
          v
 +--------------------------------------------------------------------+
 |  Data Layer  (Schemas & State Files)                               |
-|  project.schema.json | stage-result.schema.json | approval.schema  |
+|  project.schema.json | stage-result.schema.json | radar-scan.schema|
 |  state.json | audit/*.json | artifacts                             |
 +--------------------------------------------------------------------+
 ```
@@ -47,7 +47,7 @@ The data layer stores all persistent state as JSON files validated against JSON 
 **Schemas:**
 - `schemas/project.schema.json` -- Project state file structure (project_id, name, stage, status, artifacts, approved_stages, audit_log)
 - `schemas/stage-result.schema.json` -- Output from each pipeline stage (evidence, assumptions, risks, artifacts, next_actions)
-- `schemas/approval.schema.json` -- Human approval records (approval_id, decision, artifact_hash, expires_at)
+- `schemas/radar-scan.schema.json` -- Opportunity scans from `autopilot radar`
 
 **State files:**
 - `projects/<project-id>/state.json` -- Current pipeline state for a project
@@ -70,7 +70,7 @@ The logic layer contains the core pipeline scripts.
 
 **`scripts/validate_artifact.py`** -- Validates JSON artifacts against their schemas. Supports strict mode that checks referenced file paths exist.
 
-**`scripts/create_issue.py`** -- Creates GitHub Issues for approval requests and task tracking. Supports idempotency via `.issue-keys.json` marker files.
+**`scripts/report.py`** -- Renders project and portfolio Markdown from state: the pending gate, artifacts with real-vs-mock provenance, the real numbers, and the audit timeline.
 
 **`scripts/report.py`** -- Generates Markdown reports from project state: pending gate, artifacts with real-vs-mock provenance, the real GSC/GA4 numbers, the test run, the deployment, approvals, and the audit timeline.
 
@@ -78,7 +78,7 @@ The logic layer contains the core pipeline scripts.
 
 ### Execution Layer
 
-The execution layer bridges the workflow engine and AI agents through adapters.
+The execution layer bridges the local driver and AI agents through adapters.
 
 **`adapters/adapter_interface.py`** -- Defines the `AgentAdapter` abstract base class, `StageRequest` and `AgentResponse` data types, and the `validate_response()` helper.
 
@@ -92,7 +92,7 @@ The execution layer bridges the workflow engine and AI agents through adapters.
 
 ### Orchestration Layer
 
-GitHub Actions workflows orchestrate the pipeline. Each workflow:
+`autopilot.py` + `scripts/orchestrator.py` orchestrate the pipeline. For each stage they:
 1. Validates the environment
 2. Runs the appropriate adapter for the stage
 3. Validates the output against the schema
@@ -102,12 +102,12 @@ GitHub Actions workflows orchestrate the pipeline. Each workflow:
 7. Handles failures
 
 **Workflow files:**
-- `radar-weekly.yml` -- Discovery stage (scheduled weekly + manual trigger)
-- `validate-opportunity.yml` -- Validation stage (requires approval)
-- `plan-product.yml` -- Planning stage (requires approval)
-- `build-and-test.yml` -- Building and testing stages
+- `autopilot radar` -- Opportunity discovery, before a project exists
+- `autopilot run` -- walks the state machine, pausing at each approval gate
+- `autopilot deploy` -- Cloudflare deployment, as a pre-transition action
+- `autopilot metrics` -- real Search Console / GA4 feedback
 - `release.yml` -- Release stage (requires approval)
-- `growth-review.yml` -- Growth and iteration stage
+- `autopilot report` -- project and portfolio status
 
 ## State Machine
 

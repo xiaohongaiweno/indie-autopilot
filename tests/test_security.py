@@ -53,58 +53,7 @@ def test_mock_agent_failure_modes_never_set_real_data():
 
 # ---- 2. Approval schema requires source_event ------------------------------
 
-def test_approval_schema_requires_source_event():
-    import jsonschema
-    schema_path = os.path.join(ROOT, "schemas", "approval.schema.json")
-    with open(schema_path) as f:
-        schema = json.load(f)
-
-    # Build an approval without source_event
-    approval = {
-        "approval_id": "appr-test-001",
-        "project_id": "example-product",
-        "stage": "validating",
-        "decision": "approved",
-        "approved_by": "test-user",
-        "approved_at": "2026-10-09T12:00:00Z",
-        "artifact_hash": "sha256-abcdef1234567890",
-        # source_event is missing
-    }
-    validator = jsonschema.Draft7Validator(schema)
-    errors = list(validator.iter_errors(approval))
-    assert len(errors) > 0
-    assert any("source_event" in e.message for e in errors)
-
-
-def test_approval_empty_source_event_fails():
-    """source_event must be a non-empty string (type: string)."""
-    import jsonschema
-    schema_path = os.path.join(ROOT, "schemas", "approval.schema.json")
-    with open(schema_path) as f:
-        schema = json.load(f)
-
-    approval = {
-        "approval_id": "appr-test-001",
-        "project_id": "example-product",
-        "stage": "validating",
-        "decision": "approved",
-        "approved_by": "test-user",
-        "approved_at": "2026-10-09T12:00:00Z",
-        "artifact_hash": "sha256-abcdef1234567890",
-        "source_event": "",
-    }
-    # Empty string is technically valid for type:string, but required field is present
-    validator = jsonschema.Draft7Validator(schema)
-    errors = list(validator.iter_errors(approval))
-    # The schema requires source_event to be present (which it is),
-    # so empty string passes schema validation. But the field IS required.
-    # This test confirms the required constraint works.
-    # For empty string, schema passes but check_transition validates decision.
-    # The key point: source_event is in the required list.
-    assert "source_event" in schema["required"]
-
-
-# ---- 3. Production release blocked by default ------------------------------
+# ---- 2. Production release blocked by default ------------------------------
 
 def test_production_release_blocked_by_default():
     """workflow-policy.yml has production_allowed: false for release stage."""
@@ -140,56 +89,8 @@ def test_validate_environment_hides_token_values():
     assert "value hidden" in result.stdout
 
 
-# ---- 5. create_issue validates labels (no injection) -----------------------
+# ---- 5. State machine prevents skipping approval gates ---------------------
 
-def test_create_issue_rejects_injection_labels():
-    """Labels with shell injection characters are rejected."""
-    scripts_dir = os.path.join(ROOT, "scripts")
-    result = subprocess.run(
-        [
-            sys.executable, os.path.join(scripts_dir, "create_issue.py"),
-            "--title", "Test",
-            "--body", "body",
-            "--labels", "valid; rm -rf /",
-            "--dry-run",
-        ],
-        capture_output=True, text=True,
-    )
-    assert result.returncode != 0
-    assert "invalid" in result.stderr.lower() or "label" in result.stderr.lower()
-
-
-def test_create_issue_rejects_backtick_injection():
-    scripts_dir = os.path.join(ROOT, "scripts")
-    result = subprocess.run(
-        [
-            sys.executable, os.path.join(scripts_dir, "create_issue.py"),
-            "--title", "Test",
-            "--body", "body",
-            "--labels", "`whoami`",
-            "--dry-run",
-        ],
-        capture_output=True, text=True,
-    )
-    assert result.returncode != 0
-
-
-def test_create_issue_accepts_valid_labels():
-    scripts_dir = os.path.join(ROOT, "scripts")
-    result = subprocess.run(
-        [
-            sys.executable, os.path.join(scripts_dir, "create_issue.py"),
-            "--title", "Test",
-            "--body", "body",
-            "--labels", "bug,enhancement,high-priority",
-            "--dry-run",
-        ],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0
-
-
-# ---- 6. State machine prevents skipping approval gates ---------------------
 
 def test_state_machine_prevents_skipping_approval():
     """Cannot move from validation into planning without approval."""

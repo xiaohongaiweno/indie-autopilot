@@ -4,13 +4,14 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 
 ## Current State of Integration
 
-**Important:** Skills are currently instruction documents (SKILL.md files) that guide AI agents. They are NOT directly executable from GitHub Actions. Integration requires an agent adapter that can read the skill instructions and execute them via an AI agent (Claude Code, Codex, etc.).
+**Important:** Skills are instruction documents (SKILL.md files) that guide AI agents. They are not executable on their own: `adapters/skill_agent.py` inlines a skill (plus its references and assets) into a brief and hands it to a pluggable agent backend -- a CLI such as Claude Code or Codex, or a manual handoff you run anywhere.
 
 **What exists today:**
 - 31 SKILL.md files in `indie-builder-skills/skills/` -- each describes a specific task
 - 1 mock adapter (`adapters/mock_agent.py`) -- returns fake data for testing pipeline wiring
-- 0 production adapters -- no adapter currently reads SKILL.md files and executes them
-- 1 workflow (`radar-weekly.yml`) -- uses the mock adapter for discovery
+- `adapters/skill_agent.py` -- reads SKILL.md files and executes them through a backend
+- `adapters/mock_agent.py` -- offline, deterministic, for wiring and tests
+- 26 of the 31 skills are wired to a pipeline stage; see `config/pipeline.yaml`
 
 **What is needed:**
 - Agent adapters that can read SKILL.md instructions and execute them
@@ -22,13 +23,13 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 | Status | Meaning |
 |---|---|
 | `documented` | Skill exists as SKILL.md with instructions |
-| `adapter-needed` | Needs an adapter to be callable from GitHub Actions |
+| `adapter-needed` | Not yet wired into a stage's skill list |
 | `mock-available` | Mock adapter can simulate this skill's output |
-| `not-yet-integrated` | Not connected to any workflow |
+| `not-yet-integrated` | No pipeline stage consumes it yet |
 
 ## Pipeline Stage Mapping
 
-### Stage 1: Discovery (workflow: radar-weekly.yml)
+### Stage 1: Discovery (autopilot radar) 
 
 | # | Skill | Status | Input | Output | Integration Method |
 |---:|---|---|---|---|---|
@@ -44,7 +45,7 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 4. Parse the agent output into the stage-result schema
 5. Update `radar-weekly.yml` to use the new adapter instead of mock_agent.py
 
-### Stage 2: Research (workflow: validate-opportunity.yml)
+### Stage 2: Research (stage) 
 
 | # | Skill | Status | Input | Output | Integration Method |
 |---:|---|---|---|---|---|
@@ -60,7 +61,7 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 3. Configure the adapter to receive discovery artifacts as input
 4. Return a combined research_result artifact
 
-### Stage 3: Validation (workflow: validate-opportunity.yml, after approval gate)
+### Stage 3: Validation (stage) 
 
 | # | Skill | Status | Input | Output | Integration Method |
 |---:|---|---|---|---|---|
@@ -68,7 +69,7 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 
 **Note:** product-validation is used in both research and validation stages. In research, it does initial validation. In validation (after approval), it does deep validation.
 
-### Stage 4: Planning (workflow: plan-product.yml)
+### Stage 4: Planning (stage) 
 
 | # | Skill | Status | Input | Output | Integration Method |
 |---:|---|---|---|---|---|
@@ -84,7 +85,7 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 2. Each skill's output feeds into the next skill's input
 3. The adapter returns a combined plan_result artifact
 
-### Stage 5: Building (workflow: build-and-test.yml)
+### Stage 5: Building (stage) 
 
 | # | Skill | Status | Input | Output | Integration Method |
 |---:|---|---|---|---|---|
@@ -95,12 +96,12 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 **Current integration:** Mock adapter returns simulated build results. No live adapter exists.
 
 **To integrate:**
-1. Create a build adapter that orchestrates indie-tech-architecture -> ai-coding-workflow -> security-privacy-review
+1. ~~Create a build adapter~~ -- done: `building` runs indie-tech-architecture -> ai-coding-workflow -> security-privacy-review, and the orchestrator verifies real files landed in `app/`
 2. The adapter needs access to the codebase (via allowed_read_paths)
-3. For ai-coding-workflow, the adapter may need to actually execute code generation (via Claude Code or similar)
+3. For ai-coding-workflow the agent must actually write files, not describe them; `code_dir` + `produces_code` enforce that
 4. Return build_result and security_review artifacts
 
-### Stage 6: Testing (workflow: build-and-test.yml)
+### Stage 6: Testing (stage) 
 
 | # | Skill | Status | Input | Output | Integration Method |
 |---:|---|---|---|---|---|
@@ -114,7 +115,7 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 2. The adapter needs to actually run tests and check deployment readiness
 3. Return test_result artifact
 
-### Stage 7: Release (workflow: release.yml)
+### Stage 7: Release (stage) 
 
 | # | Skill | Status | Input | Output | Integration Method |
 |---:|---|---|---|---|---|
@@ -128,7 +129,7 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 2. The adapter needs production credentials (via environment variables)
 3. Return release_checklist and rollback_plan artifacts
 
-### Stage 8: Growth (workflow: growth-review.yml)
+### Stage 8: Growth (stage) 
 
 | # | Skill | Status | Input | Output | Integration Method |
 |---:|---|---|---|---|---|
@@ -148,7 +149,7 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 2. The adapter needs access to analytics, Search Console, and feedback data
 3. Return growth_review artifact
 
-### Stage 9: Maintain (no dedicated workflow yet)
+### Stage 9: Maintain (no dedicated stage yet)
 
 | # | Skill | Status | Input | Output | Integration Method |
 |---:|---|---|---|---|---|
@@ -161,12 +162,12 @@ This document maps all 31 skills in `indie-builder-skills/` to the autopilot pip
 | 30 | `indie-workflow-automation` | documented, not-yet-integrated | Repetitive tasks, workflow patterns | Automation plan: task identification, permission design, approval points, retry logic | Agent adapter reads SKILL.md, designs automation, returns automation plan JSON |
 | 31 | `skills-quality-auditor` | documented, not-yet-integrated | SKILL.md files, integration results | Quality report: responsibility boundaries, duplication, input/output, evidence standards | Agent adapter reads SKILL.md, audits skills, returns quality report JSON |
 
-**Current integration:** None. These skills are documented but not connected to any workflow.
+**Current integration:** cross-project memory, skill-library self-auditing, post-launch support docs, cost monitoring and meta workflow tooling have no stage that consumes them. `tests/test_skill_agent.py` records them as an explicit allow-list so they cannot be orphaned by accident.
 
 **To integrate:**
-1. Create a maintain workflow (e.g., `maintain-review.yml`)
+1. Create a maintain stage (it would need its own states in `scripts/state_machine.py`)
 2. Create adapters for each maintain skill
-3. Schedule the workflow (e.g., monthly review)
+3. Decide how it is triggered (no scheduler is built in)
 
 ## Skill Handoff Relationships
 

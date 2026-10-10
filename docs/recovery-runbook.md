@@ -1,11 +1,9 @@
 # Recovery Runbook
 
-> **Note (local driver):** this runbook was written for the GitHub Actions
-> driver. The `gh workflow run ...` commands below no longer apply -- replace
-> them with `./autopilot.py run <project>` (which resumes from `state.json`) or
+> **Driver:** this runbook now uses the local driver. Recovery is
+> `./autopilot.py run <project>` (resumes from `state.json`) or
 > `./autopilot.py move <project> --to <stage> --force --reason "..."` for an
-> audited override. The state-machine recovery paths and diagnosis techniques
-> are unchanged. See [local-usage.md](local-usage.md).
+> audited override. See [local-usage.md](local-usage.md).
 
 When things break -- and they will -- this runbook tells you how to diagnose and recover. The state machine has built-in recovery paths, but you need to know which one to use.
 
@@ -32,7 +30,7 @@ All failures fall into one of four categories. Identifying the category first te
 
 ```bash
 # Re-trigger a workflow
-gh workflow run radar-weekly.yml -f project_id=my-product -f mock_mode=true
+./autopilot.py radar
 ```
 
 **When to escalate:** If the same transient failure occurs 3+ times in a row, investigate the underlying service.
@@ -67,7 +65,7 @@ python scripts/check_transition.py \
   --to-stage validating
 
 # If OK, re-trigger the workflow
-gh workflow run validate-opportunity.yml -f project_id=my-product
+./autopilot.py run my-product --adapter skill
 ```
 
 **When to escalate:** If you cannot determine the root cause from the error messages, check the audit log for context.
@@ -182,7 +180,7 @@ python scripts/check_transition.py \
   --to-stage researching
 
 # If OK, re-trigger the research workflow
-gh workflow run validate-opportunity.yml -f project_id=my-product
+./autopilot.py run my-product --adapter skill
 ```
 
 **When to escalate:** If the failure is due to a fundamental problem with the product idea, consider moving to `rejected` and starting a completely new project.
@@ -274,25 +272,35 @@ python adapters/mock_agent.py \
 # Then re-check the transition
 ```
 
-**Expired approval:**
-- Request a new approval
-- The old approval is no longer valid
-
-```bash
-# Create a new GitHub Issue for approval
-python scripts/create_issue.py \
-  --title "Approval required: validation for my-product (re-approval)" \
-  --body "Previous approval expired. Please review updated research artifacts." \
-  --project-id my-product \
-  --stage validating \
-  --labels "approval,validation" \
-  --project-dir projects/my-product
-```
+**Approvals do not expire.** An approval stays valid until you revoke it. If you
+want to re-confirm a decision, re-run the pipeline and decline the gate, then
+approve again — or simply approve the new target stage.
 
 **Missing approval:**
-- Check if the approval was ever created
-- If not, create it via the GitHub Issue flow
-- If it exists but isn't in state.json, add it to the `approved_stages` array
+
+Approvals are written by the pipeline, never by hand:
+
+```bash
+# See what is waiting and what it needs
+./autopilot.py report my-product
+
+# Approve the next gate
+./autopilot.py approve my-product --stage planning
+
+# Or run interactively and answer the prompt
+./autopilot.py run my-product
+```
+
+If you are editing `state.json` directly, the shape is a list of entries whose
+`stage` is the **target** stage:
+
+```json
+"approved_stages": [
+  {"stage": "planning", "approved_at": "...", "approval_id": "appr-...", "approved_by": "you"}
+]
+```
+
+Prefer `autopilot approve` — it fills in the id, the actor, and the audit entry.
 
 **Artifact file not found:**
 - Check if the artifact file exists at the path specified in state.json
@@ -323,7 +331,7 @@ cat projects/my-product/state.json | jq '.approved_stages[]'
 ### Getting a new approval
 
 1. **Review the artifacts** -- Make sure they are still valid and relevant.
-2. **Create a new approval issue** -- Use `create_issue.py` with a note that this is a re-approval.
+2. **Re-approve the gate** -- `./autopilot.py approve <project> --stage <target>`, noting in your own records why it is being re-confirmed.
 3. **Get approval** -- Follow the normal approval flow.
 4. **Update state.json** -- Add the new approval to `approved_stages`.
 
@@ -405,7 +413,7 @@ Most failures can be recovered using the procedures above. However, some situati
 
 ```bash
 # Check running workflows
-gh run list --workflow=radar-weekly.yml
+./autopilot.py radar-list
 # Cancel if needed
 gh run cancel <run-id>
 ```
@@ -463,7 +471,7 @@ Project stuck?
 
 | Problem | Recovery Command |
 |---|---|
-| Transient failure | `gh workflow run <workflow>.yml -f project_id=<id>` |
+| Transient failure | `./autopilot.py run <project>` (resumes from `state.json`) |
 | Missing artifact | Re-run the stage or manually add artifact |
 | Expired approval | Create new approval issue |
 | Blocked state | `check_transition.py --to-stage researching` (or validating/building) |
