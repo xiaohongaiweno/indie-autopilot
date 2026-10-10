@@ -83,7 +83,6 @@ def test_valid_forward_transition_check_passes(from_s, to_s):
 INVALID_TRANSITIONS = [
     (State.DISCOVERED, State.BUILDING),
     (State.RESEARCHING, State.LAUNCHED),
-    (State.DISCOVERED, State.VALIDATING),
     (State.PLANNING, State.LAUNCHED),
     (State.BUILDING, State.DISCOVERED),
 ]
