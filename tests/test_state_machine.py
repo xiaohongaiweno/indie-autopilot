@@ -14,6 +14,7 @@ if SCRIPTS_DIR not in sys.path:
 from state_machine import (
     State,
     TRANSITIONS,
+    HAPPY_PATH,
     check_transition,
     apply_transition,
     get_valid_transitions,
@@ -44,9 +45,6 @@ def _make_state_data(
 
 ALL_STAGES = [
     (State.DISCOVERED, State.RESEARCHING),
-    (State.DISCOVERED, State.VALIDATING),
-    (State.DISCOVERED, State.PLANNING),
-    (State.VALIDATING, State.PLANNING),
     (State.RESEARCHING, State.VALIDATION_PENDING),
     (State.VALIDATION_PENDING, State.VALIDATING),
     (State.VALIDATING, State.VALIDATION_APPROVED),
@@ -60,6 +58,28 @@ ALL_STAGES = [
     (State.GROWING, State.ITERATING),
     (State.ITERATING, State.GROWING),
 ]
+
+# Shortcuts were removed on purpose so that approval gates cannot be skipped.
+# `autopilot move --force` is the audited escape hatch.
+REMOVED_SHORTCUTS = [
+    (State.DISCOVERED, State.VALIDATING),
+    (State.DISCOVERED, State.PLANNING),
+    (State.VALIDATING, State.PLANNING),
+    (State.VALIDATING, State.BUILDING),
+]
+
+
+@pytest.mark.parametrize("from_s,to_s", REMOVED_SHORTCUTS)
+def test_shortcut_transitions_are_gone(from_s, to_s):
+    assert (from_s, to_s) not in TRANSITIONS
+
+
+def test_happy_path_is_a_linear_chain():
+    """HAPPY_PATH must follow real transitions and be strictly linear."""
+    for src, dst in zip(HAPPY_PATH, HAPPY_PATH[1:]):
+        assert (src, dst) in TRANSITIONS
+        assert get_valid_transitions(src) == [dst] or src == State.GROWING
+
 
 
 @pytest.mark.parametrize("from_s,to_s", ALL_STAGES)
@@ -272,9 +292,6 @@ APPROVAL_TRANSITIONS = [
 
 NO_APPROVAL_TRANSITIONS = [
     (State.DISCOVERED, State.RESEARCHING),
-    (State.DISCOVERED, State.VALIDATING),
-    (State.DISCOVERED, State.PLANNING),
-    (State.VALIDATING, State.PLANNING),
     (State.RESEARCHING, State.VALIDATION_PENDING),
     (State.VALIDATING, State.VALIDATION_APPROVED),
     (State.VALIDATION_APPROVED, State.PLANNING),

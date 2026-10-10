@@ -1,6 +1,6 @@
 # indie-autopilot
 
-Orchestrate an indie developer's workflow from opportunity discovery to growth -- using GitHub Actions as the execution backbone.
+Orchestrate an indie developer's workflow from opportunity discovery to growth -- entirely on your own machine.
 
 indie-autopilot is a state-machine pipeline that coordinates 31 specialized AI skills across 8 workflow stages. It moves a product idea through research, validation, planning, building, testing, release, and growth -- with human approval gates at critical decision points.
 
@@ -8,16 +8,16 @@ indie-autopilot is a state-machine pipeline that coordinates 31 specialized AI s
 
 ```
 +------------------+     +------------------+     +------------------+     +------------------+
-|   Data Sources   |     |  Agent Adapters  |     |  State Machine   |     | GitHub Actions   |
+|   Data Sources   |     |  Agent Adapters  |     |  State Machine   |     |   Local Driver   |
 |                  |     |                  |     |                  |     |                  |
-|  Hacker News     |---->|  Mock Adapter    |---->|  17 States       |---->|  radar-weekly    |
-|  Google Trends   |     |  Claude Code CLI |     |  23 Transitions  |     |  validate-opp    |
-|  Reddit          |     |  Codex CLI       |     |  Approval Gates  |     |  plan-product    |
-|  Product Hunt    |     |  Custom API      |     |  Audit Trail     |     |  build-and-test  |
-|  Web Search      |     |                  |     |                  |     |  release         |
-|                  |     |  Reads SKILL.md  |     |  Validates       |     |  growth-review   |
-|  (all mock by    |     |  instructions,   |     |  transitions &   |     |                  |
-|   default)       |     |  returns results |     |  artifacts       |     |                  |
+|  Hacker News     |---->|  Mock Adapter    |---->|  17 States       |---->|  autopilot run   |
+|  Google Trends   |     |  Claude Code CLI |     |  19 Transitions  |     |  autopilot status|
+|  Reddit          |     |  Codex CLI       |     |  Approval Gates  |     |  autopilot move  |
+|  Product Hunt    |     |  Custom API      |     |  Audit Trail     |     |                  |
+|  Web Search      |     |                  |     |                  |     |  Terminal gates: |
+|                  |     |  Reads SKILL.md  |     |  Validates       |     |  approve with y  |
+|  (all mock by    |     |  instructions,   |     |  transitions &   |     |  (no GitHub      |
+|   default)       |     |  returns results |     |  artifacts       |     |   round trip)    |
 +------------------+     +------------------+     +------------------+     +------------------+
          |                       |                        |                        |
          v                       v                        v                        v
@@ -31,68 +31,77 @@ indie-autopilot is a state-machine pipeline that coordinates 31 specialized AI s
 ### How it works
 
 1. **Skills** (`indie-builder-skills/`) are instruction documents (SKILL.md files) that guide AI agents through specific tasks like competitor analysis, MVP scoping, or launch QA.
-2. **Agent Adapters** (`adapters/`) bridge the gap between the workflow engine and AI agents. They read skill instructions, execute them via an AI agent, and return structured results.
+2. **Agent Adapters** (`adapters/`) bridge the gap between the pipeline and AI agents. They read skill instructions, execute them via an AI agent, and return structured results.
 3. **State Machine** (`scripts/state_machine.py`) enforces valid transitions, checks artifact requirements, and manages the approval gate logic.
-4. **GitHub Actions** (`.github/workflows/`) orchestrate the pipeline -- running adapters, validating outputs, creating issues for approvals, and generating reports.
+4. **Local Driver** (`autopilot.py` + `scripts/orchestrator.py`) walks a project along the state machine -- running the stage adapter, registering the artifact it produced, and pausing at each approval gate for a local `y`/`n` decision.
+
+Everything runs offline by default: the `mock` adapter is deterministic, so the entire pipeline can be exercised without API keys, network calls, or model credits.
 
 ## Prerequisites
 
 - **Python 3.10+**
-- **GitHub account** with `gh` CLI installed and authenticated
 - **pip** for dependency management
 
-```bash
-# Verify gh CLI
-gh auth status
-```
+No GitHub account, remote, or `gh` CLI is required. State and artifacts are plain files in `projects/`, versioned by ordinary `git` if you choose to use it.
 
 ## Quick Start
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/indie-autopilot.git
-cd indie-autopilot
-
-# 2. Install dependencies
+# 1. Install dependencies
 pip install -r requirements.txt
 
-# 3. Validate your environment
+# 2. Validate your environment
 python scripts/validate_environment.py
 
-# 4. Run mock discovery (no API keys needed)
-python adapters/mock_agent.py \
-  --stage discovery \
-  --project-id my-first-product \
-  --output-dir projects/my-first-product/research/
+# 3. Find a need worth building (creates radar-data/profile.md on first run)
+./autopilot.py radar
 
-# 5. Validate the output
-python scripts/validate_artifact.py \
-  --schema schemas/stage-result.schema.json \
-  --artifact projects/my-first-product/research/mock-discovery-result.json
+# 4. Approve an opportunity -> it becomes a project at `discovered`,
+#    then run the pipeline. It stops at each approval gate and asks you.
+./autopilot.py run my-first-product --adapter skill
 
-# 6. Generate a status report
-python scripts/generate_report.py \
-  --project-dir projects/my-first-product
+# 5. Inspect progress at any time
+./autopilot.py status my-first-product
+./autopilot.py history my-first-product
+```
+
+See [docs/local-usage.md](docs/local-usage.md) for the full command reference.
+
+To create a project by hand instead:
+
+```bash
+mkdir -p projects/my-first-product
+cat > projects/my-first-product/state.json << 'EOF'
+{
+  "project_id": "my-first-product",
+  "name": "My First Product",
+  "stage": "discovered",
+  "status": "active",
+  "created_at": "2025-01-01T00:00:00Z",
+  "updated_at": "2025-01-01T00:00:00Z",
+  "approved_stages": [],
+  "artifacts": {},
+  "audit_log": []
+}
+EOF
+
+./autopilot.py run my-first-product
 ```
 
 ## Project Structure
 
 ```
 indie-autopilot/
-  .github/workflows/       # GitHub Actions pipeline definitions
-    radar-weekly.yml       # Weekly opportunity scan
-    validate-opportunity.yml
-    plan-product.yml
-    build-and-test.yml
-    release.yml
-    growth-review.yml
+  autopilot.py             # Local CLI driver (run / status / history / approve / move)
   adapters/                # Agent adapter implementations
     adapter_interface.py   # Abstract base class + data types
     mock_agent.py          # Deterministic mock for testing
   config/                  # Pipeline configuration
+    pipeline.yaml          # Stage -> agent/artifact mapping (drives the orchestrator)
     workflow-policy.yml    # Approval gates, timeouts, retry limits
     sources.yml            # Data source status (mock/live)
   docs/                    # Documentation
+    local-usage.md         # How to drive the local pipeline
     architecture.md        # System architecture details
     approval-policy.md     # Human approval gate rules
     recovery-runbook.md    # How to fix things when they break
@@ -103,9 +112,10 @@ indie-autopilot/
     HANDOFF-MAP.md         # Skill handoff relationships
   projects/                # Per-project state and artifacts
     <project-id>/
-      state.json           # Current pipeline state
+      state.json           # Current pipeline state (the single source of truth)
       audit/               # Transition audit trail
-      research/            # Discovery and research artifacts
+      research/            # Research artifacts
+      validation/          # Validation artifacts
       planning/            # Plans and specs
       build/               # Build artifacts
       testing/             # Test results
@@ -116,10 +126,10 @@ indie-autopilot/
     stage-result.schema.json  # Stage output schema
     approval.schema.json   # Approval record schema
   scripts/                 # Core pipeline scripts
+    orchestrator.py        # Pipeline engine (drives stages, gates, artifacts)
     state_machine.py       # State definitions and transition logic
     validate_artifact.py   # JSON Schema validation
-    check_transition.py    # Transition validation with approval checks
-    create_issue.py        # GitHub Issue creation (for approvals)
+    check_transition.py    # Standalone transition check
     generate_report.py     # Markdown status report generator
     validate_environment.py  # Environment health checks
   tests/                   # Test suite
@@ -155,64 +165,79 @@ python scripts/validate_artifact.py \
   --artifact projects/$PROJECT_ID/state.json
 ```
 
-## Running Workflows
+## Running the Pipeline
 
-### radar-weekly (Discovery)
-
-Runs every Monday at 9am UTC. Scans for new opportunities.
-
-```bash
-# Manual trigger via gh CLI
-gh workflow run radar-weekly.yml -f project_id=new -f mock_mode=true
-```
-
-### validate-opportunity
-
-Deep validation of a discovered opportunity. Requires approval to proceed.
+The whole pipeline is driven by one command. It walks the project along the
+canonical path, running each stage's adapter and pausing at every approval gate.
 
 ```bash
-gh workflow run validate-opportunity.yml -f project_id=my-product
+# Run until the next refusal, or to the end of the happy path
+./autopilot.py run my-first-product
+
+# Stop once a specific stage is reached
+./autopilot.py run my-first-product --to testing
+
+# Auto-approve every gate (unattended)
+./autopilot.py run my-first-product --yes
 ```
 
-### plan-product
+### The canonical path
 
-MVP scoping and planning. Requires approval before committing to build.
+```
+discovered
+  -> researching          run research adapter, register research_result
+  -> validation_pending
+  -> validating           ⏸ GATE before_deep_validation
+  -> validation_approved  run validation adapter, register validation_result
+  -> planning             run planning adapter, register plan_result
+  -> plan_approved        ⏸ GATE before_mvp_commit
+  -> building             run building adapter, register build_result
+  -> testing              run testing adapter, register test_result
+  -> release_pending      run release adapter, register release_result
+  -> launched             ⏸ GATE before_production_release
+  -> growing              run growth adapter, register growth_review
+```
+
+Shortcut edges that skip a stage or a gate do not exist. To leave the path on
+purpose, use the audited escape hatch:
 
 ```bash
-gh workflow run plan-product.yml -f project_id=my-product
+./autopilot.py move my-first-product --to testing --force --reason "hotfix verification"
 ```
 
-### build-and-test
-
-Implementation and testing. Runs the build and test stages.
+### Inspecting a project
 
 ```bash
-gh workflow run build-and-test.yml -f project_id=my-product
+./autopilot.py status my-first-product     # stage, artifacts, approvals, next steps
+./autopilot.py history my-first-product    # full audit log
+./autopilot.py list                        # all known projects
 ```
 
-### release
-
-Production release. Requires approval before deploying.
+### Approving a gate ahead of time
 
 ```bash
-gh workflow run release.yml -f project_id=my-product
+./autopilot.py approve my-first-product --stage plan_approved
 ```
 
-### growth-review
+Approvals are recorded in `state.json`'s `approved_stages` array, which is what
+the state machine reads. Nothing else needs to know how the approval was given.
 
-Post-launch growth analysis and iteration planning.
-
-```bash
-gh workflow run growth-review.yml -f project_id=my-product
-```
+Full reference: [docs/local-usage.md](docs/local-usage.md).
 
 ## Switching from Mock to Live Mode
 
-By default, all data sources are in mock mode. To use real data:
+By default, the pipeline uses the deterministic `mock` adapter -- no API keys, no
+network, no model credits. To use a real agent you need an adapter that
+implements `AgentAdapter`, registered in `config/pipeline.yaml`:
 
-1. Edit `config/sources.yml` and set `enabled: true` + `mode: live` for each source you want to activate.
-2. Provide the required API keys as environment variables or GitHub secrets.
-3. Set the `mock_mode` input to `false` when triggering workflows.
+```bash
+./autopilot.py run my-first-product --adapter mock   # default
+```
+
+Data sources are configured separately in `config/sources.yml`:
+
+1. Set `enabled: true` + `mode: live` for each source you want to activate.
+2. Provide the required API keys as environment variables.
 
 ```yaml
 # config/sources.yml example
@@ -235,9 +260,43 @@ Currently available live sources:
 - **Hacker News** -- free Algolia API, no key required (enabled by default)
 - All other sources require API keys and are disabled by default
 
-## Adding a New Agent Adapter
+## Running Real Skills
 
-See `adapters/README.md` for full details. The short version:
+`mock` is the offline adapter. The `skill` adapter runs the real SKILL.md
+methodology through a pluggable **agent backend**, so the pipeline is not tied
+to any one AI tool:
+
+```bash
+./autopilot.py run my-first-product --adapter skill     # default backend: handoff
+AUTOPILOT_BACKEND=claude ./autopilot.py run my-first-product --adapter skill
+```
+
+With the default `handoff` backend, each stage writes a self-contained brief
+(`task.md`) plus the JSON contract, and waits for you to drop the result into
+`agent-result.json`. You can run that brief in Claude Code, Codex, CodeBuddy,
+DeepSeek Harness, or a plain chat window -- no credentials or CLI required.
+
+Adding another agent is a config edit, not code:
+
+```yaml
+# config/pipeline.yaml
+backends:
+  codebuddy:
+    class: adapters.agent_backends.CommandBackend
+    options:
+      command: ["codebuddy", "run", "--file", "{prompt_file}"]
+```
+
+Which skills each stage runs is configured under `skills:` in the same file
+(deliberately a focused subset -- all 31 skills total ~165 KB).
+
+See [docs/local-usage.md](docs/local-usage.md#8-running-real-work-skills--agent-backends)
+for the full backend reference and the handoff walkthrough.
+
+## Adding a New Adapter
+
+Only needed if a stage must do something other than "read skills, call an
+agent". See `adapters/README.md` for full details. The short version:
 
 ```python
 from adapters.adapter_interface import AgentAdapter, AgentResponse, StageRequest
@@ -255,18 +314,37 @@ class MyAdapter(AgentAdapter):
         return "my-adapter"
 ```
 
-Register the adapter in your pipeline config:
+Then register it in `config/pipeline.yaml` and select it with `--adapter`:
 
 ```yaml
 # config/pipeline.yaml
-stages:
-  discovery:
-    adapter: my_adapter_module.MyAdapter
-    timeout_seconds: 300
-    max_retries: 2
+adapters:
+  mock:
+    module: adapters.mock_agent
+    class: MockAgent
+  skill:
+    module: adapters.skill_agent
+    class: SkillAgentAdapter
 ```
 
+```bash
+./autopilot.py run my-first-product --adapter skill
+```
+
+Note that `config/pipeline.yaml`'s `stages:` section maps *pipeline stages* to
+the adapter stage that fulfils them (and the artifact it must produce) -- it is
+not where adapters are selected.
+
 ## Recovering from Failures
+
+Progress lives entirely in `state.json`, so **re-running is the recovery
+mechanism** -- `autopilot run` picks up from the recorded stage and skips work
+whose artifact is already present on disk:
+
+```bash
+./autopilot.py run my-first-product          # resume wherever it stopped
+./autopilot.py run my-first-product --rerun  # force every stage to re-run
+```
 
 The state machine has built-in recovery paths:
 
@@ -276,6 +354,13 @@ The state machine has built-in recovery paths:
 | `failed` | Reset to `discovered` (requires approval) or retry `researching` |
 | `paused` | Reset to `discovered` or retry `researching` |
 | `rejected` | Reset to `discovered` to start over |
+
+If the state machine cannot route where you need to go, use the audited
+override rather than editing `state.json` by hand:
+
+```bash
+./autopilot.py move my-first-product --to blocked --force --reason "why"
+```
 
 ```bash
 # Check what transitions are valid
@@ -288,21 +373,45 @@ python scripts/check_transition.py \
 
 ## Security Model
 
-- **Human approval gates** at validation, planning, release, and paid service stages
-- **Artifact hash binding** -- approvals are invalidated if artifacts change
-- **No self-approval** -- adapters cannot approve their own output
-- **Mock/live separation** -- mock data is clearly labeled and never treated as real
-- **Path restrictions** -- adapters can only read files in allowed paths
-- **No credential access** -- adapters receive tasks and return results, never touch production secrets
-- **Audit trail** -- every state transition is logged with timestamp, actor, and details
+- **Human approval gates** at validation, planning, and release -- enforced by the
+  state machine and surfaced as local terminal prompts
+- **No self-approval** -- the adapter that produces an artifact is never the
+  component that grants the approval; the gate is answered by a human at a TTY
+  (or explicitly waived with `--yes`)
+- **Mock/live separation** -- mock data is clearly labeled (`is_real_data: false`)
+  and never treated as real
+- **Path restrictions** -- adapters declare which paths they may read
+- **No credential access** -- adapters receive tasks and return results; they do
+  not read production secrets
+- **Audit trail** -- every stage execution, approval, rejection, and transition is
+  logged in `state.json`'s `audit_log` with timestamp, actor, and details
+- **Audited overrides** -- `autopilot move --force` requires a `--reason` and
+  records that gates were bypassed
+
+Approvals are recorded locally with an approver name and timestamp. There is no
+cryptographic binding of an approval to an artifact hash today, so an approval
+stays valid if the artifact it covered is later regenerated.
 
 See `docs/approval-policy.md` for the full approval policy.
 
 ## Configuration
 
+### pipeline.yaml
+
+Maps pipeline stages to the adapter stage that fulfils them, and to the artifact
+the outgoing transition requires:
+
+```yaml
+stages:
+  building:
+    agent_stage: building
+    output_dir: build
+    artifact_key: build_result
+```
+
 ### workflow-policy.yml
 
-Controls stage execution behavior:
+Controls stage execution behavior (timeouts are read from here by the orchestrator):
 
 ```yaml
 stages:
@@ -330,7 +439,6 @@ sources:
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `GITHUB_TOKEN` | For live mode | GitHub API access |
 | `SERPAPI_KEY` | Optional | Google Trends via SerpAPI |
 | `AHREFS_API_KEY` | Optional | SEO research |
 | `REDDIT_CLIENT_ID` | Optional | Reddit data source |

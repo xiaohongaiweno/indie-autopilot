@@ -57,6 +57,10 @@ class StageRequest:
     expected_output_schema: str  # path to schema file
     timeout_seconds: int = 300
     max_retries: int = 2
+    #: Directory the adapter may use for scratch/handoff files. The orchestrator
+    #: sets this to the stage's output directory; backends that need somewhere
+    #: to write a task brief rely on it.
+    work_dir: str | None = None
 
     def __post_init__(self) -> None:
         if self.stage not in VALID_STAGES:

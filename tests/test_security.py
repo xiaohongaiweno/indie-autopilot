@@ -126,17 +126,18 @@ def test_validate_environment_hides_token_values():
     """validate_environment should never print actual token values."""
     scripts_dir = os.path.join(ROOT, "scripts")
     env = os.environ.copy()
-    env["GITHUB_TOKEN"] = "super-secret-token-xyz123"
+    secret = "super-secret-token-xyz123"
+    env["SERPAPI_KEY"] = secret
 
     result = subprocess.run(
         [sys.executable, os.path.join(scripts_dir, "validate_environment.py")],
         capture_output=True, text=True, env=env,
     )
     # The secret must never appear in output
-    assert "super-secret-token-xyz123" not in result.stdout
-    assert "super-secret-token-xyz123" not in result.stderr
+    assert secret not in result.stdout
+    assert secret not in result.stderr
     # It should say "set (value hidden)" instead
-    assert "value hidden" in result.stdout or "set" in result.stdout.lower()
+    assert "value hidden" in result.stdout
 
 
 # ---- 5. create_issue validates labels (no injection) -----------------------

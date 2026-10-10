@@ -1,6 +1,13 @@
 # Architecture
 
-indie-autopilot is a state-machine pipeline that orchestrates AI skills through a GitHub Actions workflow. This document describes the system layers, state machine, data flow, and design decisions.
+> **Note (local driver):** the pipeline no longer runs on GitHub Actions. The
+> orchestration layer is now `autopilot.py` + `scripts/orchestrator.py`, which
+> drives stages and approval gates locally. Sections below that describe
+> workflow YAML files are kept for historical context; see
+> [local-usage.md](local-usage.md) for the current driver. The state machine,
+> schemas, and artifact rules described here are still accurate.
+
+indie-autopilot is a state-machine pipeline that orchestrates AI skills through a local driver. This document describes the system layers, state machine, data flow, and design decisions.
 
 ## System Layers
 

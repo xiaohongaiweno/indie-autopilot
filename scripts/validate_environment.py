@@ -6,7 +6,6 @@ import importlib
 import json
 import logging
 import os
-import subprocess
 import sys
 
 logger = logging.getLogger(__name__)
@@ -123,65 +122,68 @@ def _check_schema_files(repo_root: str) -> list[dict]:
     return results
 
 
-def _check_env_var(name: str) -> dict:
+def _check_env_var(name: str, required: bool = False) -> dict:
     value = os.environ.get(name)
     if value:
         return {
             "name": f"Env: {name}",
-            "category": "required",
+            "category": "required" if required else "optional",
             "status": "PASS",
             "detail": "set (value hidden)",
         }
     else:
         return {
             "name": f"Env: {name}",
-            "category": "required",
-            "status": "WARN",
+            "category": "required" if required else "optional",
+            "status": "FAIL" if required else "WARN",
             "detail": "not set",
         }
 
 
-def _check_gh_cli() -> dict:
+def _check_pipeline_config(repo_root: str) -> list[dict]:
+    """Verify the local driver and its stage configuration are present."""
+    results = []
+
+    cli = os.path.join(repo_root, "autopilot.py")
+    results.append({
+        "name": "autopilot CLI",
+        "category": "required",
+        "status": "PASS" if os.path.isfile(cli) else "FAIL",
+        "detail": cli if os.path.isfile(cli) else "autopilot.py not found",
+    })
+
+    config_path = os.path.join(repo_root, "config", "pipeline.yaml")
+    if not os.path.isfile(config_path):
+        results.append({
+            "name": "Pipeline config",
+            "category": "required",
+            "status": "FAIL",
+            "detail": "config/pipeline.yaml not found",
+        })
+        return results
+
     try:
-        result = subprocess.run(
-            ["gh", "auth", "status"],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode == 0:
-            return {
-                "name": "gh CLI auth",
-                "category": "optional",
-                "status": "PASS",
-                "detail": "authenticated",
-            }
-        else:
-            return {
-                "name": "gh CLI auth",
-                "category": "optional",
-                "status": "WARN",
-                "detail": f"not authenticated: {result.stderr.strip().splitlines()[-1] if result.stderr.strip() else 'unknown error'}",
-            }
-    except FileNotFoundError:
-        return {
-            "name": "gh CLI auth",
-            "category": "optional",
-            "status": "WARN",
-            "detail": "gh CLI not found",
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "name": "gh CLI auth",
-            "category": "optional",
-            "status": "WARN",
-            "detail": "timed out",
-        }
-    except OSError as exc:
-        return {
-            "name": "gh CLI auth",
-            "category": "optional",
-            "status": "WARN",
-            "detail": f"error: {exc}",
-        }
+        import yaml
+
+        with open(config_path, "r", encoding="utf-8") as fh:
+            config = yaml.safe_load(fh) or {}
+        stages = config.get("stages") or {}
+        ok = bool(stages)
+        results.append({
+            "name": "Pipeline config",
+            "category": "required",
+            "status": "PASS" if ok else "FAIL",
+            "detail": f"{len(stages)} stage(s) configured" if ok else "no stages defined",
+        })
+    except Exception as exc:  # noqa: BLE001 - report any parse failure
+        results.append({
+            "name": "Pipeline config",
+            "category": "required",
+            "status": "FAIL",
+            "detail": f"could not parse: {exc}",
+        })
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -214,11 +216,13 @@ def run_checks(strict: bool = False) -> list[dict]:
     # Schema files
     results.extend(_check_schema_files(repo_root))
 
-    # Environment variables
-    results.append(_check_env_var("GITHUB_TOKEN"))
+    # Local pipeline configuration (replaces the GitHub Actions driver)
+    results.extend(_check_pipeline_config(repo_root))
 
-    # gh CLI
-    results.append(_check_gh_cli())
+    # Optional data-source API keys (see config/sources.yml). Values are never
+    # printed -- only whether they are set.
+    for var in ("SERPAPI_KEY", "AHREFS_API_KEY", "REDDIT_CLIENT_ID"):
+        results.append(_check_env_var(var))
 
     return results
 

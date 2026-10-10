@@ -1,5 +1,12 @@
 # Recovery Runbook
 
+> **Note (local driver):** this runbook was written for the GitHub Actions
+> driver. The `gh workflow run ...` commands below no longer apply -- replace
+> them with `./autopilot.py run <project>` (which resumes from `state.json`) or
+> `./autopilot.py move <project> --to <stage> --force --reason "..."` for an
+> audited override. The state-machine recovery paths and diagnosis techniques
+> are unchanged. See [local-usage.md](local-usage.md).
+
 When things break -- and they will -- this runbook tells you how to diagnose and recover. The state machine has built-in recovery paths, but you need to know which one to use.
 
 ## Failure Classification

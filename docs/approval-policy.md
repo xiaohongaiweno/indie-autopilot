@@ -1,5 +1,16 @@
 # Approval Policy
 
+> **Note (local approvals):** approval is now obtained locally. `autopilot run`
+> pauses at each gate and asks `[y]批准 [n]拒绝 [q]退出`; the decision is written
+> to `state.json`'s `approved_stages` array by `scripts/orchestrator.py`. GitHub
+> Issues and `/approve` comments are no longer part of the mechanism.
+> `autopilot approve --stage <stage>` pre-grants a gate.
+>
+> The gate *rules* below (which transitions are gated, their risk levels, and
+> what they protect) still apply. The artifact-hash binding and expiration
+> mechanisms described in this document are **not implemented** -- see
+> [local-usage.md](local-usage.md#5-how-approvals-are-stored).
+
 indie-autopilot uses human approval gates at critical decision points to prevent automated systems from making irreversible or high-cost decisions without human review.
 
 This document defines the approval rules, mechanisms, and constraints.

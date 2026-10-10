@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Radar Scan",
+  "description": "One opportunity scan: a pipeline envelope around the scoreboard entries produced by the indie-product-radar skill. Enums mirror indie-builder-skills/skills/indie-product-radar/scripts/score.py, which is the authoritative validator.",
+  "type": "object",
+  "required": ["scan_id", "generated_at", "summary", "opportunities"],
+  "properties": {
+    "scan_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier for this scan, e.g. 2026-10-10-0730"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "中文摘要：本轮扫描覆盖了什么、最重要的发现是什么"
+    },
+    "report_path": {
+      "type": "string",
+      "description": "相对仓库根目录的 Markdown 报告路径，如 radar-data/scans/2026-10-10-report.md"
+    },
+    "unavailable": {
+      "type": "array",
+      "description": "哪些数据源不可用、因此哪些判断只能标注为推测",
+      "items": { "type": "string" }
+    },
+    "opportunities": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/opportunity" }
+    }
+  },
+  "definitions": {
+    "opportunity": {
+      "type": "object",
+      "required": ["id", "name", "pos", "s", "sig", "veto", "status", "fact"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "pos": {
+          "type": "string",
+          "description": "为【谁】解决【什么问题】，替代【现有方案】"
+        },
+        "ind": { "type": "string", "description": "行业/场景" },
+        "s": {
+          "type": "object",
+          "description": "八维评分，每维 0-10 整数（demand 18 / trend 13 / pay 18 / gap 13 / acq 13 / dev 10 / moat 5 / fit 10 加权）",
+          "required": ["demand", "trend", "pay", "gap", "acq", "dev", "moat", "fit"],
+          "properties": {
+            "demand": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "trend": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "pay": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "gap": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "acq": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "dev": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "moat": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "fit": { "type": "integer", "minimum": 0, "maximum": 10 }
+          }
+        },
+        "sig": {
+          "type": "array",
+          "description": "只有真实来源支撑的信号类型才能勾选；少于 3 类不得进入 validating/building",
+          "items": {
+            "type": "string",
+            "enum": ["SEO/需求", "热点/趋势", "新兴产品", "用户痛点", "商业化", "竞争格局"]
+          }
+        },
+        "veto": {
+          "type": "array",
+          "description": "命中任一即最高只能到 watch",
+          "items": {
+            "type": "string",
+            "enum": ["依赖单一平台 API 且无替代", "重度合规", "需冷启动双边网络", "消费级低付费且无广告模式"]
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["inbox", "watch", "validating", "building", "archived"]
+        },
+        "fact": {
+          "type": "string",
+          "description": "fact 为 事实/部分验证 时 links 必须至少有 1 条 http 链接",
+          "enum": ["事实", "部分验证", "推测"]
+        },
+        "market": { "type": "string", "description": "市场规模粗估；找不到就写 未估算" },
+        "pricing": { "type": "string" },
+        "timing": { "type": "string" },
+        "acquisition": { "type": "string", "description": "前 100 个用户从哪来，获客成本粗估" },
+        "wedge": { "type": "string", "description": "切入楔子：MVP 的单一核心功能" },
+        "exp": { "type": "string", "description": "7 天验证实验与成功判据" },
+        "notes": { "type": "string", "description": "用【事实】【推测】【风险】【创始人匹配】分段标注" },
+        "links": { "type": "string", "description": "换行分隔的证据链接" }
+      }
+    }
+  }
+}

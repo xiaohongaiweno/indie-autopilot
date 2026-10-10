@@ -96,22 +96,6 @@ TRANSITIONS: dict[tuple[State, State], TransitionConfig] = {
         auto=True,
         failure_action="block",
     ),
-    (S.DISCOVERED, S.VALIDATING): _tc(
-        auto=True,
-        failure_action="block",
-    ),
-    (S.DISCOVERED, S.PLANNING): _tc(
-        auto=True,
-        failure_action="block",
-    ),
-    (S.VALIDATING, S.PLANNING): _tc(
-        auto=True,
-        failure_action="block",
-    ),
-    (S.VALIDATING, S.BUILDING): _tc(
-        auto=True,
-        failure_action="block",
-    ),
     (S.RESEARCHING, S.VALIDATION_PENDING): _tc(
         required_artifacts=["research_result"],
         failure_action="block",
@@ -205,6 +189,29 @@ TRANSITIONS: dict[tuple[State, State], TransitionConfig] = {
         failure_action="fail",
     ),
 }
+
+
+# The canonical, gate-respecting forward path, in order.
+#
+# `autopilot run` walks this sequence. Every "shortcut" edge that used to skip a
+# stage or a gate (discovered->validating, discovered->planning,
+# validating->planning, validating->building) has been deliberately removed, so
+# that the approval gates actually mean something. To leave this path on
+# purpose, use `autopilot run --force` / `autopilot move` (both audited).
+HAPPY_PATH: tuple[State, ...] = (
+    S.DISCOVERED,
+    S.RESEARCHING,
+    S.VALIDATION_PENDING,
+    S.VALIDATING,
+    S.VALIDATION_APPROVED,
+    S.PLANNING,
+    S.PLAN_APPROVED,
+    S.BUILDING,
+    S.TESTING,
+    S.RELEASE_PENDING,
+    S.LAUNCHED,
+    S.GROWING,
+)
 
 
 # States from which no forward progress is possible without external action.

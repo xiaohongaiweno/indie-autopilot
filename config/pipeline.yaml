@@ -1,0 +1,174 @@
+# Local pipeline configuration.
+#
+# Maps pipeline (state-machine) stages to the agent stage that fulfils them.
+#
+# Each stage's agent produces exactly the artifact that the stage's *outgoing*
+# transition requires, which is why `artifact_key` lines up with the
+# `required_artifacts` declared in scripts/state_machine.py:
+#
+#   researching      --research_result-->  validation_pending
+#   validating       --validation_result-> validation_approved
+#   planning         --plan_result------->  plan_approved
+#   building         --build_result------>  testing
+#   testing          --test_result------->  release_pending
+#   release_pending  (approval only)------> launched
+#   growing          --growth_review------>  iterating
+#
+# Stages with no entry below (discovered, validation_pending,
+# validation_approved, plan_approved, launched, iterating) are pure state
+# nodes: they have no agent to run and no artifact of their own.
+
+# Where an unattended `autopilot run` stops when no --to is given.
+# `growing` is the end of the happy path; growth then cycles
+# growing <-> iterating, which is a recurring activity rather than a one-shot.
+default_target: growing
+
+stages:
+  researching:
+    agent_stage: research
+    output_dir: research
+    artifact_key: research_result
+    description: "Market research and competitor scan"
+
+  validating:
+    agent_stage: validation
+    output_dir: validation
+    artifact_key: validation_result
+    description: "Deep validation of the opportunity"
+
+  planning:
+    agent_stage: planning
+    output_dir: planning
+    artifact_key: plan_result
+    description: "MVP scope, PRD and task breakdown"
+
+  building:
+    agent_stage: building
+    output_dir: build
+    artifact_key: build_result
+    description: "Implementation of the MVP"
+
+  testing:
+    agent_stage: testing
+    output_dir: testing
+    artifact_key: test_result
+    description: "Automated and manual verification"
+
+  release_pending:
+    agent_stage: release
+    output_dir: release
+    artifact_key: release_result
+    description: "Release checklist and rollback plan"
+
+  growing:
+    agent_stage: growth
+    output_dir: growth
+    artifact_key: growth_review
+    description: "Growth experiments and iteration planning"
+
+# Adapter registry. `mock` is fully offline and deterministic, so the whole
+# pipeline can be exercised without spending model credits or network calls.
+# `skill` runs the real SKILL.md methodology through a pluggable agent backend.
+adapters:
+  mock:
+    module: adapters.mock_agent
+    class: MockAgent
+  skill:
+    module: adapters.skill_agent
+    class: SkillAgentAdapter
+
+
+# ---------------------------------------------------------------------------
+# Skills — which methodology each stage executes
+# ---------------------------------------------------------------------------
+#
+# Prompt size matters: all 31 skills together are ~165 KB, and the growth stage
+# alone would be ~49 KB if every growth skill were included. So each stage gets
+# a focused subset. Add or remove names here to tune quality vs. cost; the
+# names are directory names under indie-builder-skills/skills/.
+#
+# Skills with references/ and assets/ attachments get those inlined too,
+# because a handoff agent has no filesystem access. Current brief sizes:
+#   research ~23k chars, growth ~63k chars, planning ~5k chars.
+
+# Used by `autopilot radar` (the pre-project opportunity scan).
+radar_skills:
+  - indie-product-radar
+  - emerging-keyword-radar
+
+skills:
+  discovery:
+    - indie-product-radar
+    - emerging-keyword-radar
+  research:
+    - product-validation
+    - competitor-intelligence
+    - seo-opportunity-research
+  validation:
+    - product-validation
+  planning:
+    - product-positioning
+    - mvp-scope-planner
+    - product-requirements
+    # Add for bigger planning prompts:
+    # - product-ux-conversion
+    # - indie-tech-architecture
+  building:
+    - ai-coding-workflow
+    - security-privacy-review
+  testing:
+    - launch-readiness-qa
+  release:
+    - deployment-operations
+    - launch-campaign-planner
+  growth:
+    # indie-product-reach is itself the growth orchestration layer, so it can
+    # pull in the specialised growth skills as it needs them.
+    - indie-product-reach
+    - product-analytics
+
+
+# ---------------------------------------------------------------------------
+# Agent backends — how a prompt actually gets executed
+# ---------------------------------------------------------------------------
+#
+# This is intentionally agent-agnostic: any CLI can be driven by a command
+# template, and `handoff` needs no CLI at all.
+#
+# CommandBackend placeholders (each stays one argv element; no shell is used):
+#   {prompt} {prompt_file} {schema} {schema_file} {work_dir} {result_file}
+backends:
+  # Zero-dependency fallback: writes task.md + output.schema.json, you run the
+  # brief in whatever agent you like, save the JSON to agent-result.json.
+  handoff:
+    class: adapters.agent_backends.HandoffBackend
+
+  claude:
+    class: adapters.agent_backends.CommandBackend
+    options:
+      command:
+        - claude
+        - -p
+        - "{prompt}"
+        - --output-format
+        - json
+
+  codex:
+    class: adapters.agent_backends.CommandBackend
+    options:
+      command:
+        - codex
+        - exec
+        - "{prompt}"
+
+  # Any other agent — CodeBuddy, DeepSeek Harness, a custom wrapper — is one
+  # more entry here. For example:
+  #
+  # codebuddy:
+  #   class: adapters.agent_backends.CommandBackend
+  #   options:
+  #     command: ["codebuddy", "run", "--file", "{prompt_file}"]
+
+# Fallback when neither --backend nor AUTOPILOT_BACKEND is set.
+# `handoff` always works, so it is the safe default.
+default_backend: handoff
