@@ -1,0 +1,10 @@
+{
+  "response": {
+    "status": "success",
+    "raw_output": "[MOCK] Generated planning result for opp-19",
+    "errors": [],
+    "duration_seconds": 0.338,
+    "mode": "mock",
+    "is_real_data": false
+  }
+}

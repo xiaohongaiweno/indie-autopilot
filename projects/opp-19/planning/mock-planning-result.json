@@ -1,0 +1,30 @@
+{
+  "project_id": "opp-19",
+  "stage": "planning",
+  "status": "success",
+  "generated_at": "2026-10-10T03:30:03.755225+00:00",
+  "summary": "[MOCK] Simulated planning for 'opp-19'. Generated a 4-week build plan with 3 milestones. Timelines and effort estimates are placeholder values.",
+  "mode": "mock",
+  "is_real_data": false,
+  "artifacts": [
+    {
+      "name": "build-plan",
+      "path": "planning/mock-build-plan.json",
+      "type": "json"
+    }
+  ],
+  "next_actions": [
+    {
+      "action": "Set up project repository and CI pipeline",
+      "priority": "high"
+    },
+    {
+      "action": "Implement core data model (Week 1)",
+      "priority": "high"
+    },
+    {
+      "action": "Build MVP feature set (Weeks 2-3)",
+      "priority": "medium"
+    }
+  ]
+}
