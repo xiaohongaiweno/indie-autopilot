@@ -90,7 +90,7 @@ jobs:
           echo "Review the report and verify critical metrics before acting on recommendations." >> "projects/${{ github.event.inputs.project_id || 'weekly-review' }}/growth/report.md"
       - name: Create PR with growth review results
         if: always()
-        uses: peter-evans/create-pull-request@67ccf781d68cd99b580ae25a5c18a9c830733529  # v7.0.0
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
         with:
           commit-message: "growth: review results for ${{ github.event.inputs.project_id || 'weekly-review' }}"
           title: "Growth: Weekly Review Results"
@@ -106,7 +106,7 @@ jobs:
     steps:
       - run: echo "Growth review workflow failed. Check logs for details."
       - name: Create diagnostic issue
-        uses: actions/github-script@60a0d83039c74a4a1b18f8a3f1c5cf06c58a7f1c  # v7.0.1
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
         with:
           script: |
             await github.rest.issues.create({
