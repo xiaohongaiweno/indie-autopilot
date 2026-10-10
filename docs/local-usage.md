@@ -405,11 +405,97 @@ runnable" over "more features".
 
 ### Honest limits
 
-Writing files is necessary but not sufficient — the pipeline currently checks
-that code *exists*, not that it *works*. Running the product's own tests belongs
-to the `testing` stage, which today still only produces a QA report. If you want
-that closed properly, the next step is to have `testing` actually execute the
-project's test command (if it defines one) and fail on a red result.
+Writing files is necessary but not sufficient. This stage checks that code
+*exists*; the `testing` stage then runs the project's own tests (see below).
+What is still unverified is that the code does anything *useful* — a suite of one
+trivial assertion passes. Judging product quality remains your job at the
+`before_code_merge` gate.
+
+---
+
+## Verifying it actually works (`testing`)
+
+The `testing` stage used to ask an agent for a QA verdict. An agent can be
+confident about code that nothing has executed, so the project's **own tests run
+first**, and a red suite stops the pipeline before the agent is even called:
+
+```
+[testing] 运行项目自带的测试 ...
+   ❌ 验证结果: failed
+      命令: python -m pytest -q
+      来源: Python project (tests)
+      退出码: 1
+ERROR: 测试未通过（failed）...
+  状态仍是 'testing' 之前，修好后重跑即可；测试红了不能进入代码检视。
+```
+
+The agent is never invoked, `test_result` is not registered, and the transition
+to the code-review gate cannot happen. Same principle as deployment: a fact about
+the world gates the qualitative step, instead of a model's opinion standing in
+for it.
+
+### What command runs
+
+Detected from what the project declares — never invented:
+
+| Declared | Command |
+|---|---|
+| `package.json` -> `scripts.test` | `npm test` / `pnpm test` / `yarn test` / `bun test`, per the lockfile |
+| pytest config, or a `tests/` / `test/` directory | `python -m pytest -q` |
+| `Makefile` with a `test:` target | `make test` |
+
+`npm init`'s placeholder script (`echo "Error: no test specified" && exit 1`) is
+recognised as *no tests*, not as a failing suite — otherwise every fresh Node
+project would report red.
+
+Check what will run without executing anything:
+
+```bash
+./autopilot.py verify my-product --dry-run   # show the detected command
+./autopilot.py verify my-product             # run it (no state changes)
+```
+
+### When nothing is declared
+
+The run is recorded as `not_configured` and the stage **continues**, but the
+result is explicitly marked unverified and the console says so:
+
+```
+⚠️  项目没有声明测试命令：本次运行**未经验证**，代码检视门会看到这一点。
+```
+
+The pipeline will not write tests on your behalf, and will not pretend it
+verified something it did not. To make that fatal instead:
+
+```yaml
+# config/pipeline.yaml
+verify:
+  require_tests: true
+```
+
+### Dependencies
+
+A generated Node project usually has no `node_modules`, and without them the
+tests cannot run at all. By default the pipeline installs them first, using the
+runner the lockfile implies, and announces it:
+
+```
+依赖未安装，先执行：npm install（可用 verify.install_dependencies 关闭）
+```
+
+Set `verify.install_dependencies: false` to be asked instead; the run then
+reports `dependencies_missing`. Python projects need no install step.
+
+### Evidence
+
+Every run writes `projects/<id>/testing/test-run.json` **before** the agent
+starts, so the brief it receives contains the real command, exit code and output
+tail, and an `audit_log` entry of action `tests_run` is appended. On a red suite
+that record is still written — the failure is preserved as evidence rather than
+swallowed.
+
+A mock-built project has no `app/`, so verification reports `no_code` and skips.
+That is the honest outcome: there was nothing to test.
 
 ---
 
@@ -769,6 +855,10 @@ mistake a failure for feedback. A failure in one source does not lose the other.
 | `没有取到任何真实数据` | Expected when sources are disabled or credentials are missing. Check with `metrics --dry-run`. |
 | `报告成功，但没有在 app/ 写出任何文件` | The agent returned JSON without writing code. In handoff mode, run `task.md` in an agent that can write files, pointed at that absolute path. |
 | `没有可部署的内容` on a mock-built project | Expected: mock builds produce no `app/`. Build with a live adapter first. |
+| `测试未通过（failed）` | The project's own tests failed. The pipeline stopped before the QA agent; fix the code and re-run. |
+| `dependencies_missing` | Dependencies could not be installed. Run the install by hand, or set `verify.install_dependencies: false` to be asked instead. |
+| `not_configured` but you expected tests | The project declares no test command. See the detection table above; `verify --dry-run` shows what was found. |
+| `no_code` | There is no `app/` yet. A mock build produces none — build with a live adapter first. |
 
 Useful diagnostic:
 

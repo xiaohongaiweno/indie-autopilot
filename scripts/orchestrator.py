@@ -98,9 +98,15 @@ class StageSpec:
     output_dir: str
     artifact_key: str
     description: str = ""
-    #: When set, the stage must produce real files in this project-relative
-    #: directory, and a live run that writes nothing is a failure.
+    #: Where the product source lives, project-relative. An input for stages
+    #: that verify it (testing) and an output for the stage that writes it.
     code_dir: str | None = None
+    #: True when this stage is the one that *writes* code_dir. Only then is
+    #: "a live run produced no files" a failure -- testing merely reads it.
+    produces_code: bool = False
+    #: When set, the project's own tests run *before* the agent, and a red
+    #: suite stops the pipeline rather than being described by a model.
+    verify: str | None = None
 
 
 @dataclass
@@ -165,6 +171,8 @@ def load_config(path: Path | str = DEFAULT_PIPELINE_CONFIG) -> PipelineConfig:
             artifact_key=entry.get("artifact_key") or f"{entry['agent_stage']}_result",
             description=entry.get("description", ""),
             code_dir=entry.get("code_dir"),
+            produces_code=bool(entry.get("produces_code", False)),
+            verify=entry.get("verify"),
         )
 
     default_target_raw = raw.get("default_target", "growing")
@@ -221,6 +229,24 @@ _PIPELINE_FILENAMES = frozenset(
     {"task.md", "output.schema.json", "agent-result.json", "scoreboard.json"}
 )
 
+#: Directories that hold tooling output rather than product code. Without this
+#: a one-file project reports six files, because running pytest leaves a cache.
+_IGNORED_DIRS = frozenset(
+    {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".venv",
+        "venv",
+        ".next",
+        ".turbo",
+        ".wrangler",
+    }
+)
+
 
 def inspect_code_dir(path: Path) -> dict[str, Any]:
     """Describe what a code directory actually contains.
@@ -237,12 +263,12 @@ def inspect_code_dir(path: Path) -> dict[str, Any]:
     for item in sorted(path.rglob("*")):
         if not item.is_file():
             continue
-        if item.name in _PIPELINE_FILENAMES:
+        if item.name in _PIPELINE_FILENAMES or item.name == ".DS_Store":
             continue
-        # Ignore the usual noise so a run cannot "pass" on a .DS_Store alone.
-        if ".git/" in str(item) or item.name == ".DS_Store":
+        relative = item.relative_to(path)
+        if _IGNORED_DIRS.intersection(relative.parts):
             continue
-        files.append(str(item.relative_to(path)))
+        files.append(str(relative))
         try:
             total += item.stat().st_size
         except OSError:
@@ -350,6 +376,74 @@ def artifact_is_current(project_dir: Path, state: dict[str, Any], spec: StageSpe
     return (Path(project_dir) / entry["path"]).is_file()
 
 
+def _verify_before_stage(
+    project_dir: Path, state: dict[str, Any], spec: StageSpec
+) -> None:
+    """Run the project's tests and register the result for the agent to read.
+
+    The result is registered as a ``test_run`` artifact **and saved to disk**
+    before the agent is invoked, because the brief is composed from the on-disk
+    state -- a handoff agent has no other way to see it.
+    """
+    import verify as verify_mod
+
+    code_dir = project_dir / (spec.code_dir or "app")
+    cfg = verify_mod.load_verify_config()
+
+    print(f"[{spec.stage.value}] 运行项目自带的测试 ...", flush=True)
+    result = verify_mod.run_verification(
+        project_dir, code_dir=code_dir, config={"verify": cfg}
+    )
+    print("   " + verify_mod.describe(result).replace("\n", "\n   "))
+
+    if spec.output_dir:
+        out_dir = project_dir / spec.output_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        run_path = out_dir / "test-run.json"
+        run_path.write_text(
+            json.dumps(verify_mod.to_artifact(result), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        state.setdefault("artifacts", {})["test_run"] = {
+            "path": str(run_path.relative_to(project_dir)),
+            "stage": spec.stage.value,
+            "generated_at": utc_now(),
+            "mode": "live" if result.is_real_data else "unavailable",
+            "is_real_data": result.is_real_data,
+        }
+    state.setdefault("audit_log", []).append(
+        {
+            "timestamp": utc_now(),
+            "action": "tests_run",
+            "actor": "autopilot",
+            "status": result.status,
+            "command": " ".join(result.command) if result.command else None,
+            "exit_code": result.exit_code,
+        }
+    )
+    save_state(project_dir, state)
+
+    if result.status in ("failed", "timeout", "dependencies_missing", "error"):
+        detail = result.output_tail.strip()[-1500:] if result.output_tail else result.notes
+        raise PipelineError(
+            f"测试未通过（{result.status}）：{' '.join(result.command or [])}\n"
+            f"  {result.notes}\n"
+            f"{detail}\n"
+            f"  状态仍是 '{spec.stage.value}' 之前，修好后重跑即可；"
+            "测试红了不能进入代码检视。"
+        )
+
+    if result.status == "not_configured" and cfg.get("require_tests"):
+        raise PipelineError(
+            f"{spec.stage.value} 阶段要求有测试，但项目没有声明任何测试命令。\n"
+            f"  {result.notes}\n"
+            "  要么给项目加测试，要么在 config/pipeline.yaml 里把 verify.require_tests 设为 false。"
+        )
+
+    if result.status == "not_configured":
+        print("   ⚠️  项目没有声明测试命令：本次运行**未经验证**，代码检视门会看到这一点。")
+
+
 def execute_stage(
     project_dir: Path,
     state: dict[str, Any],
@@ -362,6 +456,13 @@ def execute_stage(
     Returns the project-relative artifact path. The caller persists the state.
     """
     project_dir = Path(project_dir)
+
+    # Deterministic verification runs *before* the agent, and a red result stops
+    # the pipeline here. Asking a model whether the code works, with nothing
+    # executing it, is exactly the kind of claim this pipeline must not accept.
+    if spec.verify:
+        _verify_before_stage(project_dir, state, spec)
+
     request = StageRequest(
         project_id=state["project_id"],
         stage=spec.agent_stage,  # type: ignore[arg-type]
@@ -393,7 +494,7 @@ def execute_stage(
     # demanding real files from it would be meaningless. This is what stops an
     # agent from returning a confident summary and no product.
     code_report: dict[str, Any] | None = None
-    if spec.code_dir and response.mode == "live":
+    if spec.produces_code and spec.code_dir and response.mode == "live":
         code_path = project_dir / spec.code_dir
         code_report = inspect_code_dir(code_path)
         if code_report["file_count"] == 0:

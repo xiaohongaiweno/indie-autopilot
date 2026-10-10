@@ -257,6 +257,24 @@ what was written is recorded on the artifact.
 The check applies to live runs only — the mock adapter is explicitly fake, which
 is why `deploy` correctly refuses to deploy a mock-built project.
 
+### Tests actually run
+
+The `testing` stage runs the project's **own** tests before the QA agent, and a
+red suite stops the pipeline before the agent is even called — so nothing
+untested can reach the code-review gate. The command is detected from what the
+project declares (`package.json` scripts.test, pytest config, a Makefile `test`
+target) and never invented:
+
+```bash
+./autopilot.py verify my-product --dry-run   # show the detected command
+```
+
+If the project declares no tests, the run is recorded as `not_configured` and
+marked unverified rather than passing silently (`verify.require_tests: true`
+makes it fatal instead). The result is written to `testing/test-run.json` before
+the agent starts, so the brief it receives contains the real command, exit code
+and output.
+
 ### Closing the loop
 
 Everything upstream of `growing` is a guess. `metrics` reads what actually

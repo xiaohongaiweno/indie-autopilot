@@ -51,12 +51,20 @@ stages:
     # Keep it separate from output_dir: that holds pipeline metadata, and
     # deploy.py once mistook build/ for a static site to publish.
     code_dir: app
+    # This is the stage that writes code, so an empty code_dir is a failure.
+    produces_code: true
     description: "Implementation of the MVP"
 
   testing:
     agent_stage: testing
     output_dir: testing
     artifact_key: test_result
+    # Same product source the building stage wrote, stated explicitly rather
+    # than relying on the "app" fallback.
+    code_dir: app
+    # Run the project's OWN tests before the QA agent runs. A red suite stops
+    # the pipeline here, so it can never reach the code-review gate.
+    verify: auto
     description: "Automated and manual verification"
 
   release_pending:
@@ -178,6 +186,29 @@ backends:
 # Fallback when neither --backend nor AUTOPILOT_BACKEND is set.
 # `handoff` always works, so it is the safe default.
 default_backend: handoff
+
+
+# ---------------------------------------------------------------------------
+# Verification — running the project's own tests
+# ---------------------------------------------------------------------------
+#
+# The `testing` stage declares `verify: auto`, which runs the product's own test
+# command *before* the QA agent and fails the run on a red suite. A model's
+# opinion about untested code is not a substitute for running it.
+#
+# The command is detected from what the project declares:
+#   package.json scripts.test   -> npm/pnpm/yarn/bun test
+#   pytest config or tests/     -> python -m pytest
+#   Makefile `test:` target     -> make test
+# If nothing is declared the run is reported as UNVERIFIED (not as a pass).
+verify:
+  timeout_seconds: 600
+  # Installing a generated project's dependencies is what you would do by hand
+  # anyway, and without it the tests cannot run at all. Set false to be asked
+  # instead (the run then reports dependencies_missing).
+  install_dependencies: true
+  # Set true to make "no tests declared" a hard failure instead of a warning.
+  require_tests: false
 
 
 # ---------------------------------------------------------------------------

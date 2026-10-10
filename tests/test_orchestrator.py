@@ -716,3 +716,189 @@ def test_inspect_code_dir_caps_the_listing_but_not_the_count(tmp_path):
     report = orch.inspect_code_dir(tmp_path)
     assert report["file_count"] == 40
     assert len(report["files"]) == 30
+
+
+# ---------------------------------------------------------------------------
+# 10. The testing stage runs the project's own tests first
+# ---------------------------------------------------------------------------
+
+
+def _project_at_building(tmp_path, name="proj-test", test_body="def test_ok():\n    assert 1 == 1\n"):
+    """A project with real code that is ready for the testing stage."""
+    project = tmp_path / name
+    (project / "app" / "tests").mkdir(parents=True)
+    (project / "app" / "tests" / "test_x.py").write_text(test_body)
+    (project / "state.json").write_text(
+        json.dumps(
+            {
+                "project_id": name,
+                "name": name,
+                "stage": "building",
+                "status": "active",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "approved_stages": [],
+                "artifacts": {"build_result": {"path": "build/building-result.json"}},
+                "audit_log": [],
+            }
+        )
+    )
+    return project
+
+
+def _qa_payload(name):
+    return {
+        "project_id": name,
+        "stage": "testing",
+        "status": "success",
+        "generated_at": "2026-01-01T00:00:00Z",
+        "summary": "QA 完成",
+    }
+
+
+def test_testing_spec_runs_verification_but_is_not_a_code_producer(config):
+    spec = config.spec_for(orch.sm.State.TESTING)
+    assert spec.verify == "auto"
+    assert spec.code_dir == "app"
+    # reading the code is not producing it
+    assert spec.produces_code is False
+    assert config.spec_for(orch.sm.State.BUILDING).produces_code is True
+
+
+def test_red_suite_stops_before_the_agent_runs(tmp_path, config):
+    """Wave a model at untested code and it will be confident. Run the tests."""
+    project = _project_at_building(
+        tmp_path, test_body="def test_bad():\n    assert 1 == 2\n"
+    )
+    state = orch.load_state(project)
+    adapter = FakeLiveAdapter(_qa_payload("proj-test"))
+    spec = config.spec_for(orch.sm.State.TESTING)
+
+    with pytest.raises(orch.PipelineError) as excinfo:
+        orch.execute_stage(project, state, spec, adapter, config)
+
+    assert "测试未通过" in str(excinfo.value)
+    # the expensive, fallible agent call never happened
+    assert adapter.requests == []
+    assert "test_result" not in state.get("artifacts", {})
+
+
+def test_red_suite_is_still_recorded_as_evidence(tmp_path, config):
+    project = _project_at_building(
+        tmp_path, test_body="def test_bad():\n    assert 1 == 2\n"
+    )
+    state = orch.load_state(project)
+    spec = config.spec_for(orch.sm.State.TESTING)
+
+    with pytest.raises(orch.PipelineError):
+        orch.execute_stage(project, state, spec, FakeLiveAdapter(_qa_payload("proj-test")), config)
+
+    # the failure is preserved rather than swallowed
+    assert "test_run" in state["artifacts"]
+    run_file = project / state["artifacts"]["test_run"]["path"]
+    recorded = json.loads(run_file.read_text())
+    assert recorded["status"] == "failed"
+    assert recorded["is_real_data"] is True
+    assert any(e["action"] == "tests_run" for e in state["audit_log"])
+
+
+def test_green_suite_lets_the_agent_run_with_real_results(tmp_path, config):
+    project = _project_at_building(tmp_path)
+    state = orch.load_state(project)
+    adapter = FakeLiveAdapter(_qa_payload("proj-test"))
+    spec = config.spec_for(orch.sm.State.TESTING)
+
+    orch.execute_stage(project, state, spec, adapter, config)
+
+    assert len(adapter.requests) == 1
+    assert "test_result" in state["artifacts"]
+    assert "test_run" in state["artifacts"]
+
+    # saved to disk before the agent ran, because the brief is built from disk
+    saved = json.loads((project / "state.json").read_text())
+    assert saved["artifacts"]["test_run"]["is_real_data"] is True
+
+
+def test_mock_build_has_no_code_so_verification_skips(tmp_path, config):
+    """A mock project has no app/, which must not read as a failing suite."""
+    project = tmp_path / "proj-test"
+    project.mkdir()
+    (project / "state.json").write_text(
+        json.dumps(
+            {
+                "project_id": "proj-test",
+                "name": "M",
+                "stage": "building",
+                "status": "active",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "approved_stages": [],
+                "artifacts": {},
+                "audit_log": [],
+            }
+        )
+    )
+    state = orch.load_state(project)
+    spec = config.spec_for(orch.sm.State.TESTING)
+    adapter = FakeLiveAdapter(_qa_payload("proj-test"))
+
+    orch.execute_stage(project, state, spec, adapter, config)
+
+    assert len(adapter.requests) == 1
+    run = json.loads((project / "testing" / "test-run.json").read_text())
+    assert run["status"] == "no_code"
+
+
+def test_unverified_project_is_reported_not_silently_passed(tmp_path, config):
+    """Code exists but declares no tests: proceed, but say so."""
+    project = tmp_path / "proj-test"
+    (project / "app").mkdir(parents=True)
+    (project / "app" / "index.js").write_text("console.log(1)")
+    (project / "state.json").write_text(
+        json.dumps(
+            {
+                "project_id": "proj-test",
+                "name": "N",
+                "stage": "building",
+                "status": "active",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "approved_stages": [],
+                "artifacts": {},
+                "audit_log": [],
+            }
+        )
+    )
+    state = orch.load_state(project)
+    spec = config.spec_for(orch.sm.State.TESTING)
+
+    orch.execute_stage(
+        project, state, spec, FakeLiveAdapter(_qa_payload("proj-test")), config
+    )
+
+    run = json.loads((project / "testing" / "test-run.json").read_text())
+    assert run["status"] == "not_configured"
+    assert run["is_real_data"] is True
+    assert "未验证" in run["notes"]
+
+
+# --- inspect_code_dir ignoring tooling output -------------------------------
+
+
+def test_inspect_code_dir_ignores_tooling_directories(tmp_path):
+    """Running pytest leaves a cache; it is not product code."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.js").write_text("real")
+    for junk in (".pytest_cache", "node_modules", "__pycache__", ".mypy_cache"):
+        (tmp_path / junk).mkdir()
+        (tmp_path / junk / "junk.json").write_text("{}")
+
+    report = orch.inspect_code_dir(tmp_path)
+    assert report["files"] == ["src/a.js"]
+
+
+def test_inspect_code_dir_ignores_nested_tooling_directories(tmp_path):
+    (tmp_path / "src" / "node_modules").mkdir(parents=True)
+    (tmp_path / "src" / "node_modules" / "dep.js").write_text("x")
+    (tmp_path / "src" / "index.js").write_text("y")
+    assert orch.inspect_code_dir(tmp_path)["files"] == ["src/index.js"]

@@ -27,6 +27,7 @@ import orchestrator as orch  # noqa: E402
 import radar  # noqa: E402
 import deploy  # noqa: E402
 import metrics  # noqa: E402
+import verify  # noqa: E402
 from state_machine import State  # noqa: E402
 
 PROJECTS_DIR = REPO_ROOT / "projects"
@@ -312,6 +313,35 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Run the project's own tests, without touching pipeline state."""
+    project_dir = _resolve_project(args.project)
+    config = orch.load_config()
+    spec = config.spec_for(orch.sm.State.TESTING) or config.spec_for(
+        orch.sm.State.BUILDING
+    )
+    code_dir = project_dir / (spec.code_dir if spec and spec.code_dir else "app")
+
+    if args.dry_run:
+        detected = verify.detect_command(code_dir)
+        if detected is None:
+            print(f"没有检测到测试命令（{code_dir}）")
+            print("  支持：package.json 的 scripts.test / pytest 配置 / Makefile 的 test 目标")
+            return 1
+        print("将执行： " + " ".join(detected.argv))
+        print(f"  来源：{detected.source}")
+        if detected.install:
+            print(f"  依赖安装： {' '.join(detected.install)}")
+        return 0
+
+    result = verify.run_verification(project_dir, code_dir=code_dir)
+    print(verify.describe(result))
+    if result.output_tail:
+        print()
+        print(result.output_tail)
+    return 0 if result.status == "passed" else 1
+
+
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
@@ -415,6 +445,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="show what is configured, call no APIs"
     )
     p_metrics.set_defaults(func=cmd_metrics)
+
+    p_verify = sub.add_parser(
+        "verify", help="run the project's own tests (no state changes)"
+    )
+    p_verify.add_argument("project")
+    p_verify.add_argument(
+        "--dry-run", action="store_true", help="show the detected command only"
+    )
+    p_verify.set_defaults(func=cmd_verify)
 
     return parser
 
