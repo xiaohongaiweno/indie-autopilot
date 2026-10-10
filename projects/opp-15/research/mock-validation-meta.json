@@ -1,0 +1,10 @@
+{
+  "response": {
+    "status": "success",
+    "raw_output": "[MOCK] Generated validation result for opp-15",
+    "errors": [],
+    "duration_seconds": 0.393,
+    "mode": "mock",
+    "is_real_data": false
+  }
+}
