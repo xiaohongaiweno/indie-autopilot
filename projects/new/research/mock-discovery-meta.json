@@ -3,7 +3,7 @@
     "status": "success",
     "raw_output": "[MOCK] Generated discovery result for new",
     "errors": [],
-    "duration_seconds": 0.259,
+    "duration_seconds": 0.322,
     "mode": "mock",
     "is_real_data": false
   }
