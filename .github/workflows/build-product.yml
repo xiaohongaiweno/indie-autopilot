@@ -58,7 +58,7 @@ jobs:
         run: |
           python scripts/validate_artifact.py \
             --schema schemas/stage-result.schema.json \
-            --artifact "projects/${{ github.event.inputs.project_id }}/build/mock-build-result.json"
+            --artifact "projects/${{ github.event.inputs.project_id }}/build/mock-building-result.json"
       - name: Generate report
         run: |
           python scripts/generate_report.py \
