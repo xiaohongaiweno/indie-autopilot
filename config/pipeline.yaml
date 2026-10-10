@@ -172,3 +172,28 @@ backends:
 # Fallback when neither --backend nor AUTOPILOT_BACKEND is set.
 # `handoff` always works, so it is the safe default.
 default_backend: handoff
+
+
+# ---------------------------------------------------------------------------
+# Deployment
+# ---------------------------------------------------------------------------
+#
+# Deployment is not an agent task. It is a shell command whose *success* is what
+# makes `launched` true, so it runs as a pre-transition action for
+# release_pending -> launched: if the deploy fails, the project stays at
+# release_pending and can be retried, rather than being marked launched anyway.
+#
+# Credentials (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID) are read from the
+# environment or from .env -- which is gitignored -- and are prompted for
+# (value hidden) the first time they are needed.
+#
+# What gets deployed is detected from the project directory:
+#   wrangler.toml / wrangler.json / wrangler.jsonc  -> wrangler deploy
+#   dist/ or public/ or build/ (non-empty)          -> wrangler pages deploy
+# If neither exists, deployment fails with guidance instead of inventing a
+# placeholder site.
+deploy:
+  provider: cloudflare
+  # How to invoke wrangler. Override if it is installed globally, e.g.
+  # ["wrangler"], or via another package runner, e.g. ["pnpm", "dlx", "wrangler"].
+  wrangler: ["npx", "wrangler"]

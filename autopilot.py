@@ -25,6 +25,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import orchestrator as orch  # noqa: E402
 import radar  # noqa: E402
+import deploy  # noqa: E402
 from state_machine import State  # noqa: E402
 
 PROJECTS_DIR = REPO_ROOT / "projects"
@@ -197,6 +198,89 @@ def cmd_radar_list(args: argparse.Namespace) -> int:
     return 0
 
 
+DEPLOYABLE_STAGES = (State.RELEASE_PENDING, State.LAUNCHED)
+
+
+def cmd_deploy(args: argparse.Namespace) -> int:
+    """Deploy to Cloudflare, then (only on success) record `launched`."""
+    project_dir = _resolve_project(args.project)
+    state = orch.load_state(project_dir)
+    stage = State(state["stage"])
+
+    if stage not in DEPLOYABLE_STAGES:
+        raise orch.PipelineError(
+            f"项目处于 '{stage.value}'，不能部署。\n"
+            "  只有 release_pending（首次部署）或 launched（重新部署）可以部署。"
+        )
+
+    if args.dry_run:
+        result = deploy.deploy(
+            project_dir, environment=args.environment, dry_run=True
+        )
+        print("将执行： " + " ".join(result.command))
+        print("（dry-run：不部署、不校验凭据、不改状态）")
+        return 0
+
+    if stage == State.LAUNCHED:
+        # Already launched: redeploy in place, no transition to record.
+        result = deploy.deploy_before_launch(
+            project_dir,
+            state,
+            assume_yes=args.yes,
+            environment=args.environment,
+        )
+        orch.save_state(project_dir, state)
+        return 0 if result.ok else 1
+
+    # release_pending: the registered pre-transition action deploys between the
+    # gate and the transition, so `launched` is only ever recorded on success.
+    run_result = orch.run(
+        project_dir, target=State.LAUNCHED, assume_yes=args.yes
+    )
+    return 0 if run_result.completed else 1
+
+
+def cmd_domain(args: argparse.Namespace) -> int:
+    """Record the custom domain you attached by hand after deploying."""
+    project_dir = _resolve_project(args.project)
+    actor = orch.current_actor()
+    deploy.record_domain(project_dir, args.domain, actor=actor)
+
+    state = orch.load_state(project_dir)
+    state.setdefault("audit_log", []).append(
+        {
+            "timestamp": deploy.utc_now(),
+            "action": "domain_attached",
+            "actor": actor,
+            "domain": args.domain,
+        }
+    )
+    orch.save_state(project_dir, state)
+
+    print(f"✅ 已记录自定义域名：{args.domain}")
+    print(f"   状态不变（仍是 {state['stage']}）——挂域名是部署后的手动步骤。")
+    return 0
+
+
+def cmd_deploy_status(args: argparse.Namespace) -> int:
+    project_dir = _resolve_project(args.project)
+    record = deploy.load_deployment(project_dir)
+    if not record:
+        print("(还没有部署记录)")
+        return 1
+    print(f"provider   : {record.get('provider')}")
+    print(f"类型       : {record.get('kind')}")
+    print(f"环境       : {record.get('environment')}")
+    print(f"URL        : {record.get('url') or '(未解析到)'}")
+    print(f"部署时间   : {record.get('deployed_at')}")
+    domain = record.get("custom_domain")
+    print(f"自定义域名 : {domain if domain else '（尚未挂）'}")
+    if not domain:
+        print()
+        print(deploy.domain_instructions(record.get("project_name") or project_dir.name))
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
@@ -265,6 +349,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_radar_list = sub.add_parser("radar-list", help="list previous radar scans")
     p_radar_list.set_defaults(func=cmd_radar_list)
 
+    p_deploy = sub.add_parser(
+        "deploy", help="deploy to Cloudflare (records `launched` only on success)"
+    )
+    p_deploy.add_argument("project")
+    p_deploy.add_argument(
+        "--environment", default="production", choices=["production", "preview"]
+    )
+    p_deploy.add_argument(
+        "--dry-run", action="store_true", help="print the command without deploying"
+    )
+    p_deploy.add_argument("--yes", action="store_true", help="auto-approve the gate")
+    p_deploy.set_defaults(func=cmd_deploy)
+
+    p_domain = sub.add_parser(
+        "domain", help="record the custom domain you attached by hand"
+    )
+    p_domain.add_argument("project")
+    p_domain.add_argument("--domain", required=True)
+    p_domain.set_defaults(func=cmd_domain)
+
+    p_dstatus = sub.add_parser("deploy-status", help="show deployment info")
+    p_dstatus.add_argument("project")
+    p_dstatus.set_defaults(func=cmd_deploy_status)
+
     return parser
 
 
@@ -272,6 +380,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)
+
+    # Deployment is a pre-transition action, so `run` (and `deploy`) can never
+    # record `launched` without the deploy having actually succeeded.
+    orch.register_pre_transition_action(
+        State.RELEASE_PENDING, State.LAUNCHED, deploy.deploy_before_launch
+    )
+
     try:
         return args.func(args)
     except (orch.PipelineError, radar.RadarError) as exc:

@@ -30,7 +30,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 _HERE = Path(__file__).resolve().parent
 REPO_ROOT = _HERE.parent
@@ -56,6 +56,32 @@ STAGE_RESULT_SCHEMA = "schemas/stage-result.schema.json"
 
 class PipelineError(Exception):
     """Raised for any user-facing pipeline failure."""
+
+
+# ---------------------------------------------------------------------------
+# Pre-transition actions
+# ---------------------------------------------------------------------------
+
+#: Actions keyed by ``(from_state, to_state)`` that must succeed *before* the
+#: transition is recorded.
+#:
+#: Deliberately empty by default: a library-level run (tests, embedding the
+#: orchestrator) must never shell out to a deployer just because it walked past
+#: a transition. Entry points opt in explicitly -- ``autopilot.py`` registers
+#: the Cloudflare deployment here.
+PRE_TRANSITION_ACTIONS: dict[tuple[State, State], Callable[..., Any]] = {}
+
+
+def register_pre_transition_action(
+    src: State | str, dst: State | str, action: Callable[..., Any]
+) -> None:
+    """Register *action* to run before the ``src -> dst`` transition."""
+    PRE_TRANSITION_ACTIONS[(State(src), State(dst))] = action
+
+
+def unregister_pre_transition_action(src: State | str, dst: State | str) -> None:
+    """Remove a previously registered action (used by tests)."""
+    PRE_TRANSITION_ACTIONS.pop((State(src), State(dst)), None)
 
 
 # ---------------------------------------------------------------------------
@@ -547,7 +573,17 @@ def run(
                 )
             grant_approval(state, nxt, cfg.gate, actor)
 
-        # 2. Apply the transition (state machine re-validates everything).
+        # 2. Actions that must succeed *before* the transition is recorded,
+        #    because the transition's meaning depends on them. Deployment is the
+        #    reason this exists: a project is not `launched` until the deploy
+        #    actually succeeded, so a failure must leave it retryable at
+        #    `release_pending` rather than falsely advanced.
+        action = PRE_TRANSITION_ACTIONS.get((src, nxt))
+        if action is not None:
+            action(project_dir, state, assume_yes=assume_yes, actor=actor)
+            save_state(project_dir, state)
+
+        # 3. Apply the transition (state machine re-validates everything).
         try:
             new_state = sm.apply_transition(src, nxt, state)
         except ValueError as exc:
@@ -557,7 +593,7 @@ def run(
         save_state(project_dir, state)
         print(f"[{nxt.value}] ✅ 状态已更新")
 
-        # 3. Fulfil the stage we just entered.
+        # 4. Fulfil the stage we just entered.
         _ensure_stage_artifact(nxt)
 
     return RunResult(

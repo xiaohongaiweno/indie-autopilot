@@ -482,7 +482,95 @@ credentials. The orchestrator owns state; approvals come from a human.
 
 ---
 
-## 9. Troubleshooting
+## 9. Deploying to Cloudflare
+
+Deployment is the one step that is **not** an agent task. It is a shell command
+whose success is what makes `launched` true, so it runs as a *pre-transition
+action* on `release_pending -> launched`:
+
+```
+release_pending
+  ⏸ GATE before_production_release      (you approve production)
+  🚀 wrangler deploy                    (pre-transition action)
+  -> launched                           (recorded only if the deploy succeeded)
+```
+
+This ordering matters. If the deploy fails, the project **stays at
+`release_pending`** with no `deployment` artifact, so it is retryable and is
+never falsely marked launched. A run that reaches `launched` has really
+deployed.
+
+### Commands
+
+```bash
+./autopilot.py deploy my-product              # gate -> deploy -> launched
+./autopilot.py deploy my-product --dry-run    # print the command only
+./autopilot.py deploy my-product --environment preview
+./autopilot.py deploy my-product --yes        # auto-approve the gate
+./autopilot.py deploy-status my-product       # URL, type, domain status
+./autopilot.py domain my-product --domain myapp.com   # record the manual step
+```
+
+`deploy` is also reachable implicitly: `./autopilot.py run my-product` deploys
+when it reaches that transition. `deploy` on an already-`launched` project
+redeploys in place without touching state.
+
+### Credentials
+
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are read from the
+environment, then from `.env` (gitignored). The first time they are needed you
+are prompted for them, and they are saved to `.env` with mode `0600`. Values
+are never echoed or printed, and are passed to wrangler through its environment
+rather than on the command line.
+
+If you prefer not to be prompted, put them in `.env` yourself:
+
+```
+CLOUDFLARE_API_TOKEN=...
+CLOUDFLARE_ACCOUNT_ID=...
+```
+
+### What gets deployed
+
+Detected from the project directory, in this order:
+
+| Found | Treated as | Command |
+|---|---|---|
+| `wrangler.toml` / `wrangler.json` / `wrangler.jsonc` | a Worker | `wrangler deploy` |
+| `dist/` or `public/` or `build/` (non-empty) | a Pages site | `wrangler pages deploy <dir>` |
+
+If neither exists, deployment fails with guidance rather than inventing a
+placeholder site. (The pipeline's current build stage produces mock artifacts,
+so there is nothing real to deploy yet -- that changes once the `building`
+stage produces actual code.)
+
+How wrangler is invoked is configurable in `config/pipeline.yaml`, or per-run:
+
+```bash
+AUTOPILOT_WRANGLER="pnpm dlx wrangler" ./autopilot.py deploy my-product
+```
+
+### The domain step is yours
+
+Cloudflare custom domains need a dashboard action, so the pipeline stops and
+prints instructions instead of pretending to do it. Once it is live, record it:
+
+```bash
+./autopilot.py domain my-product --domain myapp.com
+```
+
+That is written to `deploy/deployment.json` and the audit log; it does not
+change the project's stage. `deploy-status` then reports it, and a later
+redeploy preserves it.
+
+### Deployment record
+
+`projects/<id>/deploy/deployment.json` holds the provider, kind, environment,
+URL, timestamp, the exact command, and up to ten previous deployments.
+
+---
+
+## 10. Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
@@ -493,6 +581,11 @@ credentials. The orchestrator owns state; approvals come from a human.
 | `does not match '^[a-z0-9]...'` | Bad `project_id`. Use lowercase hyphenated ids, at least 3 chars. |
 | `Aborted at gate; state left unchanged` | You answered `q`. Nothing was written. |
 | `Unknown target stage 'research'` | Stage names are state-machine names: use `researching`, not `research`. |
+| `缺少 Cloudflare 凭据` | Put them in `.env`, or run in an interactive terminal to be prompted. |
+| `没有可部署的内容` | Neither a wrangler config nor a non-empty `dist/`/`public/`/`build/` exists. See [section 9](#9-deploying-to-cloudflare). |
+| `部署失败：...` and the project is still `release_pending` | Correct behaviour -- a failed deploy must not mark the project launched. Fix the cause and re-run `deploy`. |
+| npm cache `EPERM` errors | The sandbox blocks npm's cache writes. Run `deploy` outside a restricted sandbox, or install wrangler globally and set `AUTOPILOT_WRANGLER=wrangler`. |
+| `项目处于 'X'，不能部署` | Only `release_pending` (first deploy) and `launched` (redeploy) can be deployed. |
 
 Useful diagnostic:
 
@@ -503,7 +596,7 @@ python scripts/check_transition.py --project-dir projects/my-product --to-stage 
 
 ---
 
-## 10. Version control (optional)
+## 11. Version control (optional)
 
 Nothing in the pipeline requires git. If you do use it, committing `state.json`
 alongside artifacts gives you a readable history and easy rollback, since the

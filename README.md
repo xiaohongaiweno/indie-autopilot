@@ -60,7 +60,10 @@ python scripts/validate_environment.py
 #    then run the pipeline. It stops at each approval gate and asks you.
 ./autopilot.py run my-first-product --adapter skill
 
-# 5. Inspect progress at any time
+# 5. Deploy (runs automatically at the release gate too)
+./autopilot.py deploy my-first-product
+
+# 6. Inspect progress at any time
 ./autopilot.py status my-first-product
 ./autopilot.py history my-first-product
 ```
@@ -206,6 +209,33 @@ Entering validation is deliberately ungated: approving the opportunity itself is
 already the decision to spend validation effort, so research and validation run
 back to back. After that, four gates take it to launch -- approve design, approve
 the build, review the code, approve the release.
+
+### Deployment
+
+The `before_production_release` gate is followed by a real Cloudflare deployment,
+which runs **before** the `launched` state is recorded:
+
+```
+release_pending
+  ⏸ GATE before_production_release
+  🚀 wrangler deploy
+  -> launched          (recorded only if the deploy succeeded)
+```
+
+So a failed deploy leaves the project retryable at `release_pending` rather than
+falsely launched. Credentials are prompted for on first use and stored in `.env`
+(gitignored, mode 0600); the values are never printed.
+
+```bash
+./autopilot.py deploy my-product --dry-run        # show the command
+./autopilot.py deploy my-product                  # gate -> deploy -> launched
+./autopilot.py deploy-status my-product           # URL, type, domain status
+./autopilot.py domain my-product --domain myapp.com  # record the domain you attached
+```
+
+Attaching a custom domain is a Cloudflare dashboard action, so the pipeline
+prints instructions and you record the result with `domain`. See
+[docs/local-usage.md](docs/local-usage.md#9-deploying-to-cloudflare).
 
 Shortcut edges that skip a stage or a gate do not exist. To leave the path on
 purpose, use the audited escape hatch:

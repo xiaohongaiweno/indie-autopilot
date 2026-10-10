@@ -175,6 +175,21 @@ def _check_pipeline_config(repo_root: str) -> list[dict]:
             "status": "PASS" if ok else "FAIL",
             "detail": f"{len(stages)} stage(s) configured" if ok else "no stages defined",
         })
+
+        # Deployment is a pre-transition action; without a usable command it
+        # would fail only after the human had approved production.
+        deploy_block = config.get("deploy") or {}
+        wrangler = deploy_block.get("wrangler")
+        results.append({
+            "name": "Deploy config",
+            "category": "required",
+            "status": "PASS" if wrangler else "FAIL",
+            "detail": (
+                f"{deploy_block.get('provider', 'cloudflare')}: {' '.join(wrangler)}"
+                if wrangler
+                else "config/pipeline.yaml has no deploy.wrangler command"
+            ),
+        })
     except Exception as exc:  # noqa: BLE001 - report any parse failure
         results.append({
             "name": "Pipeline config",
