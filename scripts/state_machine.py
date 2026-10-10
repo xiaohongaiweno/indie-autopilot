@@ -104,6 +104,10 @@ TRANSITIONS: dict[tuple[State, State], TransitionConfig] = {
         auto=True,
         failure_action="block",
     ),
+    (S.VALIDATING, S.PLANNING): _tc(
+        auto=True,
+        failure_action="block",
+    ),
     (S.RESEARCHING, S.VALIDATION_PENDING): _tc(
         required_artifacts=["research_result"],
         failure_action="block",
