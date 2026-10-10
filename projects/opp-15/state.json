@@ -1,0 +1,20 @@
+{
+  "project_id": "opp-15",
+  "name": "AI-builder",
+  "stage": "discovered",
+  "status": "active",
+  "created_at": "2026-10-10T03:17:45.301Z",
+  "updated_at": "2026-10-10T03:17:45.301Z",
+  "approved_stages": [],
+  "artifacts": {},
+  "next_action": "Auto-triggered validation from issue #15",
+  "last_run": null,
+  "audit_log": [
+    {
+      "timestamp": "2026-10-10T03:17:45.301Z",
+      "action": "project_created",
+      "actor": "github-actions",
+      "details": "Created from issue #15: [Opportunity] AI-builder"
+    }
+  ]
+}
