@@ -87,6 +87,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "projects/${{ env.PROJECT_ID }}/"
           git commit -m "Initialize project ${{ env.PROJECT_ID }} from issue #${{ github.event.issue.number }}" || echo "Nothing to commit"
+          git pull --rebase origin main
           git push
 
       - name: Check transition validity
@@ -135,6 +136,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "projects/${{ env.PROJECT_ID }}/research/"
           git commit -m "Add validation research for ${{ env.PROJECT_ID }}" || echo "Nothing to commit"
+          git pull --rebase origin main
           git push
       - name: Create approval issue
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
