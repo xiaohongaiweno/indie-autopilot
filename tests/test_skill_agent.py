@@ -618,3 +618,75 @@ def test_prompt_omits_the_code_section_for_other_stages(tmp_path):
 def test_building_stage_gets_the_tech_architecture_skill():
     """adapters/README maps Build to the tech-architecture skill; keep that true."""
     assert "indie-tech-architecture" in load_skill_map()["building"]
+
+
+# ---------------------------------------------------------------------------
+# 10. Growth stage must actually consume the data the pipeline fetches
+# ---------------------------------------------------------------------------
+
+
+def test_growth_stage_wires_the_skills_that_consume_real_data():
+    """Fetching GSC/GA4 data is pointless if no skill is asked to act on it.
+
+    These specific skills are the ones that read impressions/clicks/CTR,
+    sessions and sources, and the feedback loop; they were all orphaned while
+    only two skills were wired to `growing`.
+    """
+    growth = load_skill_map()["growth"]
+    for required in (
+        "indie-product-reach",          # growth orchestration + channel playbook
+        "product-analytics",            # interprets GA4 sessions/sources
+        "google-indexing-diagnostics",  # interprets GSC impressions/clicks/CTR
+        "conversion-optimization",      # funnel work on GA4 data
+        "customer-feedback-loop",       # turns feedback into the next iteration
+        "distribution-channel-research",  # backlinks and channels
+        "pricing-monetization",         # whether it can make money
+        "product-lifecycle-manager",    # continue / pivot / stop
+    ):
+        assert required in growth, f"growth is missing {required}"
+
+
+def test_most_skills_are_reachable_from_some_stage():
+    """Guard against silently orphaning the methodology library again."""
+    import pathlib
+
+    import yaml
+
+    cfg = yaml.safe_load((REPO_ROOT / "config" / "pipeline.yaml").read_text())
+    wired = set()
+    for names in (cfg.get("skills") or {}).values():
+        wired.update(names)
+    wired.update(cfg.get("radar_skills") or [])
+
+    on_disk = {p.name for p in (REPO_ROOT / "indie-builder-skills" / "skills").iterdir() if p.is_dir()}
+
+    orphans = on_disk - wired
+    # A handful genuinely have no stage: cross-project memory, self-auditing the
+    # skill library, post-launch support docs, cost monitoring, and meta
+    # workflow tooling. Anything beyond that list is an accident.
+    allowed_orphans = {
+        "indie-builder-memory",
+        "indie-workflow-automation",
+        "saas-cost-monitor",
+        "skills-quality-auditor",
+        "support-knowledge-base",
+    }
+    assert orphans <= allowed_orphans, f"unexpectedly orphaned: {sorted(orphans - allowed_orphans)}"
+
+
+def test_long_growth_brief_keeps_the_output_contract_at_the_end():
+    """A 100k-char brief must still end with the schema constraints."""
+    import json
+
+    skill_names = load_skill_map()["growth"]
+    request = make_request(stage="growth")
+    prompt = build_prompt(
+        request,
+        REPO_ROOT,
+        skill_names,
+        json.loads((REPO_ROOT / "schemas" / "stage-result.schema.json").read_text()),
+    )
+    assert len(prompt) > 50_000
+    assert "字段约束速查" in prompt
+    # the contract is the last thing the agent reads, not buried mid-prompt
+    assert prompt.rstrip().endswith("说明。")

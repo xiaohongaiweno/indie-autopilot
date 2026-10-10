@@ -902,3 +902,97 @@ def test_inspect_code_dir_ignores_nested_tooling_directories(tmp_path):
     (tmp_path / "src" / "node_modules" / "dep.js").write_text("x")
     (tmp_path / "src" / "index.js").write_text("y")
     assert orch.inspect_code_dir(tmp_path)["files"] == ["src/index.js"]
+
+
+# ---------------------------------------------------------------------------
+# 11. The iteration loop must actually loop
+# ---------------------------------------------------------------------------
+
+
+def growth_runs(project):
+    state = orch.load_state(project)
+    return [
+        e
+        for e in state["audit_log"]
+        if e.get("action") == "stage_executed" and e.get("stage") == "growing"
+    ]
+
+
+def test_iteration_loop_reruns_the_growth_analysis(project, config):
+    """growing -> iterating -> growing must analyse again.
+
+    It did not: the previous growth_review was still on disk, so a presence-only
+    currency check skipped the second run and the loop silently did nothing.
+    """
+    orch.run(project, target=State.GROWING, config=config, assume_yes=True)
+    assert len(growth_runs(project)) == 1
+
+    orch.run(project, target=State.ITERATING, config=config, assume_yes=True)
+    assert len(growth_runs(project)) == 1, "leaving growing must not re-run it"
+
+    orch.run(project, target=State.GROWING, config=config, assume_yes=True)
+    assert len(growth_runs(project)) == 2, "coming back must re-run the analysis"
+
+    # and the artifact really was regenerated
+    state = orch.load_state(project)
+    assert state["artifacts"]["growth_review"]["generated_at"] >= (
+        state["audit_log"][-2].get("timestamp", "")
+    )
+
+
+def test_artifact_is_stale_when_it_predates_the_current_visit(project, config):
+    spec = config.spec_for(State.GROWING)
+    project_dir = project
+    state = orch.load_state(project_dir)
+    state["artifacts"] = {
+        "growth_review": {
+            "path": "growth/mock-growth-result.json",
+            "generated_at": "2026-01-01T00:00:00+00:00",
+        }
+    }
+    (project_dir / "growth").mkdir()
+    (project_dir / "growth" / "mock-growth-result.json").write_text("{}")
+    state["audit_log"] = [
+        {
+            "action": "transition",
+            "to_stage": "growing",
+            "timestamp": "2026-06-01T00:00:00+00:00",
+        }
+    ]
+
+    # artifact is older than the transition that brought us here
+    assert orch.artifact_is_current(project_dir, state, spec) is False
+
+    # once it postdates that transition, it counts as current
+    state["artifacts"]["growth_review"]["generated_at"] = "2026-07-01T00:00:00+00:00"
+    assert orch.artifact_is_current(project_dir, state, spec) is True
+
+
+def test_artifact_without_a_transition_history_is_trusted(project, config):
+    """Legacy projects have no transition entries; do not re-run them needlessly."""
+    spec = config.spec_for(State.GROWING)
+    state = orch.load_state(project)
+    (project / "growth").mkdir()
+    (project / "growth" / "mock-growth-result.json").write_text("{}")
+    state["artifacts"] = {
+        "growth_review": {
+            "path": "growth/mock-growth-result.json",
+            "generated_at": "2026-01-01T00:00:00+00:00",
+        }
+    }
+    state["audit_log"] = []
+    assert orch.artifact_is_current(project, state, spec) is True
+
+
+def test_entered_stage_at_uses_the_most_recent_entry(project):
+    state = {
+        "audit_log": [
+            {"action": "transition", "to_stage": "growing", "timestamp": "t1"},
+            {"action": "transition", "to_stage": "iterating", "timestamp": "t2"},
+            {"action": "transition", "to_stage": "growing", "timestamp": "t3"},
+            {"action": "stage_executed", "stage": "growing", "timestamp": "t4"},
+        ]
+    }
+    assert orch._entered_stage_at(state, State.GROWING) == "t3"
+    assert orch._entered_stage_at(state, State.ITERATING) == "t2"
+    assert orch._entered_stage_at(state, State.BUILDING) is None

@@ -368,12 +368,43 @@ def _artifact_path(project_dir: Path, spec: StageSpec, mode: str) -> tuple[Path,
     return abs_path, str(abs_path.relative_to(project_dir))
 
 
+def _entered_stage_at(state: dict[str, Any], stage: State) -> str | None:
+    """Timestamp of the transition that most recently moved us into *stage*."""
+    for entry in reversed(state.get("audit_log") or []):
+        if entry.get("action") == "transition" and entry.get("to_stage") == stage.value:
+            return entry.get("timestamp")
+    return None
+
+
 def artifact_is_current(project_dir: Path, state: dict[str, Any], spec: StageSpec) -> bool:
-    """True when the artifact is registered *and* still present on disk."""
+    """True when the artifact exists *and* was produced during the current visit.
+
+    Presence alone is not enough. ``growing -> iterating -> growing`` is a real
+    cycle, and on the way back the previous ``growth_review`` is still on disk --
+    so a presence-only check silently skipped the second analysis, which made the
+    iteration loop not loop at all.
+
+    An artifact is stale when it was generated before the transition that brought
+    us into this stage. That separates a loop-back (re-run) from resuming an
+    interrupted run (skip), because a resumed run's artifact was written *after*
+    its own entry transition.
+    """
     entry = (state.get("artifacts") or {}).get(spec.artifact_key)
     if not entry or not entry.get("path"):
         return False
-    return (Path(project_dir) / entry["path"]).is_file()
+    if not (Path(project_dir) / entry["path"]).is_file():
+        return False
+
+    entered_at = _entered_stage_at(state, spec.stage)
+    generated_at = entry.get("generated_at")
+    if entered_at and generated_at and str(generated_at) < str(entered_at):
+        logger.info(
+            "Artifact '%s' predates this visit to %s; treating it as stale",
+            spec.artifact_key,
+            spec.stage.value,
+        )
+        return False
+    return True
 
 
 def _verify_before_stage(

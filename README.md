@@ -288,7 +288,12 @@ sources -- straight from Google Search Console and GA4:
 ```
 
 The result is registered as a `metrics` artifact, so the next growth run inlines
-real numbers into its brief. Two SEO opportunities are **computed** rather than
+real numbers into its brief — and the ten growth skills that actually consume
+them (indexing diagnostics, conversion, feedback loop, distribution, pricing,
+lifecycle) run at that stage.
+
+The `growing <-> iterating` cycle really cycles: coming back around re-runs the
+analysis rather than reusing last round's conclusions. Two SEO opportunities are **computed** rather than
 guessed by a model: queries ranking 11-20 (push onto page one) and queries with
 many impressions but under 2% CTR (rewrite the title).
 

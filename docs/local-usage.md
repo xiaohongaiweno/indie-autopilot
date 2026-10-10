@@ -831,6 +831,52 @@ report says so instead of inventing numbers: `mode: "unavailable"`,
 the artifact is registered as **not** real data — so nothing downstream can
 mistake a failure for feedback. A failure in one source does not lose the other.
 
+### The iteration loop
+
+`growing <-> iterating` is a cycle, so the growth analysis re-runs every time you
+come back around:
+
+```bash
+./autopilot.py run my-product --to growing     # analyse (1st time)
+./autopilot.py run my-product --to iterating   # ship the improvements
+./autopilot.py run my-product --to growing     # analyse again — a NEW analysis
+```
+
+This is deliberate, because the opposite failure is silent. An artifact is only
+treated as "already done" if it was produced **during the current visit** to that
+stage. Coming back through `iterating` makes the previous `growth_review` stale,
+so the stage runs again; resuming an interrupted run still skips completed work,
+because its artifact postdates its own entry transition.
+
+Before this was enforced, re-entering `growing` did nothing at all — you got last
+round's conclusions while believing they were fresh.
+
+### Which skills the growth stage runs
+
+Ten skills, ~100 KB of methodology, because this is the stage that decides
+whether the product is worth continuing:
+
+| Skill | What it does with the data |
+|---|---|
+| `indie-product-reach` | cross-channel playbook (AI search, backlinks, communities, email, social proof) — ~60% of the brief |
+| `product-analytics` | reads GA4 sessions/sources |
+| `google-indexing-diagnostics` | reads GSC impressions/clicks/CTR |
+| `conversion-optimization` | funnel work on GA4 data |
+| `customer-feedback-loop` | turns feedback into the next iteration |
+| `distribution-channel-research` | backlinks and channels |
+| `content-marketing-engine` | topic clusters, content briefs, internal links |
+| `pricing-monetization` | whether it can actually make money |
+| `product-lifecycle-manager` | continue / pivot / maintain / stop |
+| `project-retrospective` | what this iteration taught you |
+
+If the prompt is too heavy, `indie-product-reach` is the lever — it alone is
+about 60 KB. Remove it from `skills.growth` in `config/pipeline.yaml`.
+
+`tests/test_skill_agent.py` fails if a stage silently loses these, or if skills
+become orphaned beyond a documented allow-list (cross-project memory,
+skill-library self-auditing, post-launch support docs, cost monitoring, and meta
+workflow tooling — none of which has a stage today).
+
 ---
 
 ## 11. Troubleshooting
@@ -859,6 +905,7 @@ mistake a failure for feedback. A failure in one source does not lose the other.
 | `dependencies_missing` | Dependencies could not be installed. Run the install by hand, or set `verify.install_dependencies: false` to be asked instead. |
 | `not_configured` but you expected tests | The project declares no test command. See the detection table above; `verify --dry-run` shows what was found. |
 | `no_code` | There is no `app/` yet. A mock build produces none — build with a live adapter first. |
+| Re-entering `growing` seems to do nothing | It should now re-run; if it does not, check `--rerun`. The artifact is stale-by-design on a loop-back. |
 
 Useful diagnostic:
 

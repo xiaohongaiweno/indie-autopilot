@@ -123,23 +123,42 @@ skills:
     - product-positioning
     - mvp-scope-planner
     - product-requirements
-    # Add for bigger planning prompts:
-    # - product-ux-conversion
-    # - indie-tech-architecture
+    - product-ux-conversion
+    # indie-tech-architecture moved to `building`, which is where
+    # adapters/README maps it (stack decisions are needed while implementing).
   building:
     - indie-tech-architecture
     - ai-coding-workflow
     - security-privacy-review
   testing:
     - launch-readiness-qa
+    # The QA report feeds the code-review gate, so it is the right place to
+    # surface debt the implementation just accrued.
+    - technical-debt-manager
   release:
     - deployment-operations
     - launch-campaign-planner
   growth:
-    # indie-product-reach is itself the growth orchestration layer, so it can
-    # pull in the specialised growth skills as it needs them.
+    # indie-product-reach is the growth orchestration layer and carries the
+    # cross-channel playbook (AI search, backlinks, communities, email, social
+    # proof, Chinese market) -- it alone is ~60k chars, about 64% of this brief.
+    # If the prompt is too heavy, drop it first.
+    #
+    # The rest are the specialists that consume the data `autopilot metrics`
+    # fetches: GSC gives impressions/clicks/CTR (indexing diagnostics), GA4 gives
+    # sessions and sources (analytics + conversion), and the feedback loop turns
+    # both into the next iteration.
     - indie-product-reach
     - product-analytics
+    - google-indexing-diagnostics
+    - conversion-optimization
+    - customer-feedback-loop
+    - distribution-channel-research
+    - content-marketing-engine
+    - pricing-monetization
+    - product-lifecycle-manager
+    # Every iteration is a cycle worth reflecting on before the next one.
+    - project-retrospective
 
 
 # ---------------------------------------------------------------------------
