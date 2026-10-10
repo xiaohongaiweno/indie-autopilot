@@ -46,6 +46,11 @@ stages:
     agent_stage: building
     output_dir: build
     artifact_key: build_result
+    # This stage must produce real files, not just a summary. The orchestrator
+    # fails a live run that reports success without writing anything here.
+    # Keep it separate from output_dir: that holds pipeline metadata, and
+    # deploy.py once mistook build/ for a static site to publish.
+    code_dir: app
     description: "Implementation of the MVP"
 
   testing:
@@ -114,6 +119,7 @@ skills:
     # - product-ux-conversion
     # - indie-tech-architecture
   building:
+    - indie-tech-architecture
     - ai-coding-workflow
     - security-privacy-review
   testing:

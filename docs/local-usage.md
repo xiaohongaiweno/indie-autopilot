@@ -324,14 +324,23 @@ response for debugging.
 ```
 projects/my-product/
   state.json
+  app/                              # the real product source (see below)
+    wrangler.toml
+    src/index.js
   research/mock-research-result.json
   validation/mock-validation-result.json
   planning/mock-planning-result.json
-  build/mock-building-result.json
+  build/mock-building-result.json   # pipeline metadata, NOT the product
   testing/mock-testing-result.json
   release/mock-release-result.json
   growth/mock-growth-result.json
+  metrics/latest-metrics.json
+  deploy/deployment.json
 ```
+
+`app/` is deliberately separate from `build/`: `build/` holds this stage's
+metadata, and treating it as product output once made `deploy` offer to publish
+the pipeline's own JSON files as a website.
 
 Every result file is validated against `schemas/stage-result.schema.json` before
 it is registered; a non-conformant result fails the run rather than poisoning the
@@ -339,6 +348,68 @@ state.
 
 The mapping from stage to directory and artifact key lives in
 `config/pipeline.yaml`.
+
+---
+
+## Writing real code (`building`)
+
+The `building` stage is the one where the pipeline stops describing and starts
+making. It is configured with `code_dir: app`, which changes three things:
+
+1. The brief tells the agent to **write real files** to the absolute path
+   `projects/<id>/app/`, not to paste code into its reply.
+2. The orchestrator **verifies** the directory afterwards. A live run that
+   reports success while `app/` is empty or missing is a hard failure:
+
+```
+ERROR: Stage 'building' 报告成功，但没有在 app/ 写出任何文件。
+  该阶段要求产出真实代码；只有 JSON 摘要不算完成。
+```
+
+   Nothing is registered, so a confident summary can never stand in for a
+   product.
+3. A **manifest** of what was written is recorded on the artifact, so you can
+   see the product without opening the directory:
+
+```json
+"build_result": {
+  "path": "build/building-result.json",
+  "mode": "live",
+  "code": {
+    "file_count": 3,
+    "bytes": 128,
+    "files": ["README.md", "src/index.js", "wrangler.toml"]
+  }
+}
+```
+
+The check applies to **live runs only**. The `mock` adapter is explicitly fake,
+so demanding real files from it would be meaningless — and a mock run therefore
+produces no `app/`, which is why `deploy` correctly refuses to deploy a
+mock-built project.
+
+### What the agent is told to build
+
+The build brief is three skills plus everything the project has produced so far:
+
+| Skill | Role |
+|---|---|
+| `indie-tech-architecture` | stack and platform constraints |
+| `ai-coding-workflow` | working discipline (small steps, verify, keep quality) |
+| `security-privacy-review` | least privilege, no hardcoded secrets, default-safe |
+
+The **spec** comes from the planning artifacts, which are inlined into the same
+brief. So the agent is not asked to invent a product: it is asked to implement
+the MVP that `plan_result` already scoped, and it is told to prefer "minimal but
+runnable" over "more features".
+
+### Honest limits
+
+Writing files is necessary but not sufficient — the pipeline currently checks
+that code *exists*, not that it *works*. Running the product's own tests belongs
+to the `testing` stage, which today still only produces a QA report. If you want
+that closed properly, the next step is to have `testing` actually execute the
+project's test command (if it defines one) and fail on a red result.
 
 ---
 
@@ -696,6 +767,8 @@ mistake a failure for feedback. A failure in one source does not lose the other.
 | `权限不足（403）` | Add the service-account email to the property: Full in Search Console, Viewer in GA4. |
 | `未配置 search_console.site_url` | Let the command prompt you (it saves the answer), or write `projects/<id>/metrics.yml`. |
 | `没有取到任何真实数据` | Expected when sources are disabled or credentials are missing. Check with `metrics --dry-run`. |
+| `报告成功，但没有在 app/ 写出任何文件` | The agent returned JSON without writing code. In handoff mode, run `task.md` in an agent that can write files, pointed at that absolute path. |
+| `没有可部署的内容` on a mock-built project | Expected: mock builds produce no `app/`. Build with a live adapter first. |
 
 Useful diagnostic:
 

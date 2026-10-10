@@ -61,6 +61,10 @@ class StageRequest:
     #: sets this to the stage's output directory; backends that need somewhere
     #: to write a task brief rely on it.
     work_dir: str | None = None
+    #: When set, this stage is expected to produce **real files** here (not just
+    #: a JSON summary). The orchestrator verifies that a live run actually wrote
+    #: something, so an agent cannot report success without doing the work.
+    code_dir: str | None = None
 
     def __post_init__(self) -> None:
         if self.stage not in VALID_STAGES:

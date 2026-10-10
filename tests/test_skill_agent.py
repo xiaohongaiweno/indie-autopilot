@@ -581,3 +581,40 @@ def test_orchestrator_executes_skill_adapter_end_to_end(tmp_path):
     assert state["artifacts"]["research_result"]["mode"] == "live"
     # a live adapter must not be labelled as mock data
     assert state["artifacts"]["research_result"]["is_real_data"] is True
+
+
+# ---------------------------------------------------------------------------
+# 9. Stages that must produce real code
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_demands_real_code_when_code_dir_is_set(tmp_path):
+    """A build brief must ask for files, not a description of files."""
+    request = make_request(
+        stage="building",
+        allowed_read_paths=[str(tmp_path)],
+        work_dir=str(tmp_path / "build"),
+        code_dir=str(tmp_path / "app"),
+    )
+
+    prompt = build_prompt(request, tmp_path, [], SCHEMA)
+
+    assert "必须真的写出代码" in prompt
+    assert str(tmp_path / "app") in prompt
+    assert "必须实际创建文件" in prompt
+    assert "只在回复里贴代码不算完成" in prompt
+    # must warn that an empty directory is detected as failure
+    assert "空的会被判为失败" in prompt
+    # and must not invite writing results into the source tree
+    assert "不要在代码目录里放 result JSON" in prompt
+
+
+def test_prompt_omits_the_code_section_for_other_stages(tmp_path):
+    request = make_request(allowed_read_paths=[str(tmp_path)], work_dir=str(tmp_path))
+    prompt = build_prompt(request, tmp_path, [], SCHEMA)
+    assert "必须真的写出代码" not in prompt
+
+
+def test_building_stage_gets_the_tech_architecture_skill():
+    """adapters/README maps Build to the tech-architecture skill; keep that true."""
+    assert "indie-tech-architecture" in load_skill_map()["building"]

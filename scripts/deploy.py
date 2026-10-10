@@ -50,7 +50,15 @@ REQUIRED_CREDENTIALS = ("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID")
 WRANGLER_CONFIGS = ("wrangler.toml", "wrangler.json", "wrangler.jsonc")
 
 #: Directories treated as a static site to publish with `wrangler pages deploy`.
-STATIC_DIRS = ("dist", "public", "build")
+#:
+#: NOTE: `build` is deliberately **not** here. The pipeline writes its own build
+#: stage metadata to `projects/<id>/build/`, and including it made deploy
+#: mistake those JSON files for a website and offer to publish them.
+STATIC_DIRS = ("dist", "public")
+
+#: Where product source lives, relative to the project directory. The building
+#: stage writes real code here (see `code_dir` in pipeline.yaml).
+DEFAULT_SOURCE_DIR = "app"
 
 DEFAULT_WRANGLER = ["npx", "wrangler"]
 
@@ -249,40 +257,50 @@ def detect_target(
     deploy_config = load_deploy_config(config)
     wrangler = list(deploy_config.get("wrangler") or DEFAULT_WRANGLER)
     project_name = _project_name(project_dir)
+    source_dir = deploy_config.get("source_dir") or DEFAULT_SOURCE_DIR
 
-    for name in WRANGLER_CONFIGS:
-        config_file = project_dir / name
-        if config_file.is_file():
-            command = [*wrangler, "deploy"]
-            if environment and environment != "production":
-                command += ["--env", environment]
-            return DeployTarget(
-                kind="workers",
-                cwd=project_dir,
-                command=command,
-                config_file=config_file,
-            )
+    # Look inside the product source directory first, then at the project root
+    # for hand-made projects that keep their config there.
+    candidates = [project_dir / source_dir]
+    if (project_dir / source_dir) != project_dir:
+        candidates.append(project_dir)
 
-    for name in STATIC_DIRS:
-        asset_dir = project_dir / name
-        if asset_dir.is_dir() and any(asset_dir.iterdir()):
-            command = [*wrangler, "pages", "deploy", str(asset_dir)]
-            if project_name:
-                command += ["--project-name", project_name]
-            if environment == "production":
-                command += ["--branch", "main"]
-            return DeployTarget(
-                kind="pages",
-                cwd=project_dir,
-                command=command,
-                asset_dir=asset_dir,
-            )
+    for base in candidates:
+        if not base.is_dir():
+            continue
+        for name in WRANGLER_CONFIGS:
+            config_file = base / name
+            if config_file.is_file():
+                command = [*wrangler, "deploy"]
+                if environment and environment != "production":
+                    command += ["--env", environment]
+                return DeployTarget(
+                    kind="workers",
+                    cwd=base,
+                    command=command,
+                    config_file=config_file,
+                )
+        for name in STATIC_DIRS:
+            asset_dir = base / name
+            if asset_dir.is_dir() and any(asset_dir.iterdir()):
+                command = [*wrangler, "pages", "deploy", str(asset_dir)]
+                if project_name:
+                    command += ["--project-name", project_name]
+                if environment == "production":
+                    command += ["--branch", "main"]
+                return DeployTarget(
+                    kind="pages",
+                    cwd=base,
+                    command=command,
+                    asset_dir=asset_dir,
+                )
 
     raise DeployError(
-        f"{project_dir} 里没有可部署的内容。\n"
-        f"  · Worker: 放一个 {WRANGLER_CONFIGS[0]} 在项目根目录\n"
-        f"  · Pages : 放一个 {STATIC_DIRS[0]}/ 目录，里面是要发布的静态文件\n"
-        "（当前流水线的构建阶段产物是 mock，所以还没有真实代码可部署。）"
+        f"{project_dir} 里没有可部署的内容（已查找 {source_dir}/ 和项目根目录）。\n"
+        f"  · Worker: 放一个 {WRANGLER_CONFIGS[0]} 在 {source_dir}/ 里\n"
+        f"  · Pages : 放一个 {STATIC_DIRS[0]}/ 目录在 {source_dir}/ 里，里面是要发布的静态文件\n"
+        "（构建阶段的产物是 mock，所以还没有真实代码可部署；"
+        "真实代码由 building 阶段写到 app/。）"
     )
 
 

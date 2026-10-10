@@ -605,3 +605,88 @@ def test_cli_registers_the_deploy_hook():
         )
     finally:
         orch.unregister_pre_transition_action("release_pending", "launched")
+
+
+# ---------------------------------------------------------------------------
+# 10. Layout: pipeline metadata must never be mistaken for a website
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_build_dir_is_not_treated_as_a_site(tmp_path):
+    """Regression: deploy once offered to publish the build stage's JSON files.
+
+    `build/` holds pipeline metadata (mock-building-result.json and friends),
+    and it used to be in STATIC_DIRS, so a project with no product code looked
+    deployable and would have published its own bookkeeping.
+    """
+    project = tmp_path / "proj"
+    (project / "build").mkdir(parents=True)
+    (project / "build" / "mock-building-result.json").write_text('{"summary": "x"}')
+
+    with pytest.raises(deploy.DeployError, match="没有可部署的内容"):
+        deploy.detect_target(project)
+
+
+def test_build_is_not_a_static_dir():
+    assert "build" not in deploy.STATIC_DIRS
+
+
+def test_detects_worker_inside_the_code_dir(tmp_path):
+    project = tmp_path / "proj"
+    (project / "app").mkdir(parents=True)
+    (project / "app" / "wrangler.toml").write_text('name = "real-app"\n')
+    # pipeline metadata alongside must not confuse detection
+    (project / "build").mkdir()
+    (project / "build" / "mock-building-result.json").write_text("{}")
+
+    target = deploy.detect_target(project)
+
+    assert target.kind == "workers"
+    assert target.cwd == project / "app"
+
+
+def test_detects_pages_inside_the_code_dir(tmp_path):
+    project = tmp_path / "proj"
+    (project / "app" / "dist").mkdir(parents=True)
+    (project / "app" / "dist" / "index.html").write_text("<h1>hi</h1>")
+
+    target = deploy.detect_target(project)
+
+    assert target.kind == "pages"
+    assert target.asset_dir == project / "app" / "dist"
+
+
+def test_code_dir_takes_priority_over_project_root(tmp_path):
+    project = tmp_path / "proj"
+    (project / "app").mkdir(parents=True)
+    (project / "app" / "wrangler.toml").write_text('name = "from-app"\n')
+    (project / "wrangler.toml").write_text('name = "from-root"\n')
+
+    target = deploy.detect_target(project)
+
+    assert target.cwd == project / "app"
+    assert deploy._project_name(project) == "from-root"
+
+
+def test_project_root_still_works_for_hand_made_projects(tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "wrangler.toml").write_text('name = "legacy"\n')
+    assert deploy.detect_target(project).kind == "workers"
+
+
+def test_source_dir_is_configurable(tmp_path):
+    project = tmp_path / "proj"
+    (project / "src").mkdir(parents=True)
+    (project / "src" / "wrangler.toml").write_text('name = "custom"\n')
+
+    target = deploy.detect_target(project, config={"deploy": {"source_dir": "src"}})
+
+    assert target.cwd == project / "src"
+
+
+def test_empty_code_dir_is_not_deployable(tmp_path):
+    project = tmp_path / "proj"
+    (project / "app").mkdir(parents=True)
+    with pytest.raises(deploy.DeployError, match="没有可部署的内容"):
+        deploy.detect_target(project)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -531,3 +532,187 @@ def test_load_adapter_mock(config):
     adapter = orch.load_adapter(config, "mock")
     assert adapter.name() == "mock-agent"
     assert adapter.health_check() is True
+
+
+# ---------------------------------------------------------------------------
+# 9. Stages that must produce real code
+# ---------------------------------------------------------------------------
+
+
+class FakeLiveAdapter:
+    """An adapter that reports success, optionally writing code like a real agent."""
+
+    def __init__(self, payload, writes=None):
+        self.payload = payload
+        self.writes = writes or {}
+        self.requests = []
+
+    def name(self):
+        return "fake-live"
+
+    def health_check(self):
+        return True
+
+    def execute(self, request):
+        from adapters.adapter_interface import AgentResponse
+
+        self.requests.append(request)
+        if request.code_dir:
+            for relative, content in self.writes.items():
+                target = Path(request.code_dir) / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content)
+        return AgentResponse(
+            status="success",
+            stage_result=self.payload,
+            raw_output="",
+            mode="live",
+            is_real_data=True,
+        )
+
+
+def build_payload():
+    return {
+        "project_id": "proj-test",
+        "stage": "building",
+        "status": "success",
+        "generated_at": "2026-01-01T00:00:00Z",
+        "summary": "实现了 MVP",
+    }
+
+
+def building_spec(config):
+    return config.spec_for(orch.sm.State.BUILDING)
+
+
+def test_pipeline_config_declares_a_code_dir_for_building(config):
+    spec = building_spec(config)
+    assert spec.code_dir == "app"
+    # must not be the artifact directory, which deploy used to mistake for a site
+    assert spec.code_dir != spec.output_dir
+
+
+def test_live_build_without_code_is_a_failure(project, config):
+    """The guard that matters: a confident summary is not a product."""
+    adapter = FakeLiveAdapter(build_payload(), writes={})
+    spec = building_spec(config)
+    state = orch.load_state(project)
+
+    with pytest.raises(orch.PipelineError) as excinfo:
+        orch.execute_stage(project, state, spec, adapter, config)
+
+    message = str(excinfo.value)
+    assert "没有在 app/ 写出任何文件" in message
+    assert "只有 JSON 摘要不算完成" in message
+    # nothing was registered
+    assert "build_result" not in state.get("artifacts", {})
+
+
+def test_live_build_with_code_succeeds_and_records_it(project, config):
+    adapter = FakeLiveAdapter(
+        build_payload(),
+        writes={"wrangler.toml": 'name = "x"\n', "src/index.js": "export default {}"},
+    )
+    spec = building_spec(config)
+    state = orch.load_state(project)
+
+    rel = orch.execute_stage(project, state, spec, adapter, config)
+
+    assert rel == "build/building-result.json"
+    code = state["artifacts"]["build_result"]["code"]
+    assert code["file_count"] == 2
+    assert code["bytes"] > 0
+    assert "src/index.js" in code["files"]
+    assert (project / "app" / "src" / "index.js").is_file()
+
+
+def test_code_dir_is_passed_to_the_adapter(project, config):
+    adapter = FakeLiveAdapter(build_payload(), writes={"index.js": "x"})
+    spec = building_spec(config)
+    state = orch.load_state(project)
+
+    orch.execute_stage(project, state, spec, adapter, config)
+
+    request = adapter.requests[0]
+    assert request.code_dir == str(project / "app")
+    assert request.work_dir == str(project / "build")
+    assert request.code_dir != request.work_dir
+
+
+def test_mock_build_needs_no_code(project, config):
+    """The mock adapter is explicitly fake; demanding files from it is meaningless."""
+    spec = building_spec(config)
+    state = orch.load_state(project)
+    adapter = orch.load_adapter(config, "mock")
+
+    rel = orch.execute_stage(project, state, spec, adapter, config)
+
+    assert rel.endswith("mock-building-result.json")
+    assert not (project / "app").exists()
+    assert "code" not in state["artifacts"]["build_result"]
+
+
+def test_stage_without_code_dir_is_unaffected(project, config):
+    spec = config.spec_for(orch.sm.State.RESEARCHING)
+    assert spec.code_dir is None
+    adapter = FakeLiveAdapter(
+        {
+            "project_id": "proj-test",
+            "stage": "research",
+            "status": "success",
+            "generated_at": "2026-01-01T00:00:00Z",
+            "summary": "研究完成",
+        }
+    )
+    state = orch.load_state(project)
+    orch.execute_stage(project, state, spec, adapter, config)
+    assert "research_result" in state["artifacts"]
+
+
+# --- inspect_code_dir -------------------------------------------------------
+
+
+def test_inspect_code_dir_missing(tmp_path):
+    report = orch.inspect_code_dir(tmp_path / "nope")
+    assert report == {
+        "path": str(tmp_path / "nope"),
+        "exists": False,
+        "file_count": 0,
+        "bytes": 0,
+        "files": [],
+    }
+
+
+def test_inspect_code_dir_empty(tmp_path):
+    (tmp_path / "app").mkdir()
+    assert orch.inspect_code_dir(tmp_path / "app")["file_count"] == 0
+
+
+def test_inspect_code_dir_counts_nested_files(tmp_path):
+    (tmp_path / "src").mkdir(parents=True)
+    (tmp_path / "src" / "a.js").write_text("aaa")
+    (tmp_path / "src" / "deep").mkdir()
+    (tmp_path / "src" / "deep" / "b.js").write_text("bbbbb")
+
+    report = orch.inspect_code_dir(tmp_path)
+    assert report["file_count"] == 2
+    assert report["bytes"] == 8
+    assert report["files"] == ["src/a.js", "src/deep/b.js"]
+
+
+def test_inspect_code_dir_ignores_pipeline_and_noise_files(tmp_path):
+    (tmp_path / "task.md").write_text("brief")
+    (tmp_path / "agent-result.json").write_text("{}")
+    (tmp_path / ".DS_Store").write_text("junk")
+    (tmp_path / "real.js").write_text("code")
+
+    report = orch.inspect_code_dir(tmp_path)
+    assert report["files"] == ["real.js"]
+
+
+def test_inspect_code_dir_caps_the_listing_but_not_the_count(tmp_path):
+    for i in range(40):
+        (tmp_path / f"f{i}.js").write_text("x")
+    report = orch.inspect_code_dir(tmp_path)
+    assert report["file_count"] == 40
+    assert len(report["files"]) == 30

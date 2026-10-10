@@ -240,6 +240,23 @@ Attaching a custom domain is a Cloudflare dashboard action, so the pipeline
 prints instructions and you record the result with `domain`. See
 [docs/local-usage.md](docs/local-usage.md#9-deploying-to-cloudflare).
 
+### Real code, not a description
+
+The `building` stage is configured with `code_dir: app`, so the agent must write
+real files to `projects/<id>/app/`. The orchestrator verifies that afterwards: a
+live run reporting success with an empty `app/` is a hard failure and registers
+nothing, so a confident summary can never stand in for a product. A manifest of
+what was written is recorded on the artifact.
+
+```bash
+# live build: the agent writes real code, then deploy finds it
+./autopilot.py run my-product --adapter skill
+./autopilot.py deploy my-product --dry-run
+```
+
+The check applies to live runs only — the mock adapter is explicitly fake, which
+is why `deploy` correctly refuses to deploy a mock-built project.
+
 ### Closing the loop
 
 Everything upstream of `growing` is a guess. `metrics` reads what actually

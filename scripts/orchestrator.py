@@ -98,6 +98,9 @@ class StageSpec:
     output_dir: str
     artifact_key: str
     description: str = ""
+    #: When set, the stage must produce real files in this project-relative
+    #: directory, and a live run that writes nothing is a failure.
+    code_dir: str | None = None
 
 
 @dataclass
@@ -161,6 +164,7 @@ def load_config(path: Path | str = DEFAULT_PIPELINE_CONFIG) -> PipelineConfig:
             output_dir=entry.get("output_dir", entry["agent_stage"]),
             artifact_key=entry.get("artifact_key") or f"{entry['agent_stage']}_result",
             description=entry.get("description", ""),
+            code_dir=entry.get("code_dir"),
         )
 
     default_target_raw = raw.get("default_target", "growing")
@@ -209,6 +213,48 @@ def load_adapter(config: PipelineConfig, name: str) -> AgentAdapter:
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+#: Filenames the pipeline itself writes, which must never count as "the agent
+#: produced code". Task briefs land in the stage dir, but be defensive.
+_PIPELINE_FILENAMES = frozenset(
+    {"task.md", "output.schema.json", "agent-result.json", "scoreboard.json"}
+)
+
+
+def inspect_code_dir(path: Path) -> dict[str, Any]:
+    """Describe what a code directory actually contains.
+
+    Used as a post-condition: an agent reporting success with an empty (or
+    absent) directory has not done the work, however confident its summary.
+    """
+    path = Path(path)
+    if not path.is_dir():
+        return {"path": str(path), "exists": False, "file_count": 0, "bytes": 0, "files": []}
+
+    files: list[str] = []
+    total = 0
+    for item in sorted(path.rglob("*")):
+        if not item.is_file():
+            continue
+        if item.name in _PIPELINE_FILENAMES:
+            continue
+        # Ignore the usual noise so a run cannot "pass" on a .DS_Store alone.
+        if ".git/" in str(item) or item.name == ".DS_Store":
+            continue
+        files.append(str(item.relative_to(path)))
+        try:
+            total += item.stat().st_size
+        except OSError:
+            pass
+
+    return {
+        "path": str(path),
+        "exists": True,
+        "file_count": len(files),
+        "bytes": total,
+        "files": files[:30],
+    }
 
 
 def state_path(project_dir: Path | str) -> Path:
@@ -324,6 +370,7 @@ def execute_stage(
         expected_output_schema=STAGE_RESULT_SCHEMA,
         timeout_seconds=config.timeout_seconds(spec.agent_stage),
         work_dir=str(project_dir / spec.output_dir),
+        code_dir=str(project_dir / spec.code_dir) if spec.code_dir else None,
     )
 
     response = adapter.execute(request)
@@ -339,6 +386,28 @@ def execute_stage(
         raise PipelineError(
             f"Stage '{spec.agent_stage}' produced output that violates "
             f"{STAGE_RESULT_SCHEMA}: " + "; ".join(errors)
+        )
+
+    # A stage that declares a code directory must have actually written code.
+    # Only enforced for live runs: the mock adapter is explicitly fake, so
+    # demanding real files from it would be meaningless. This is what stops an
+    # agent from returning a confident summary and no product.
+    code_report: dict[str, Any] | None = None
+    if spec.code_dir and response.mode == "live":
+        code_path = project_dir / spec.code_dir
+        code_report = inspect_code_dir(code_path)
+        if code_report["file_count"] == 0:
+            raise PipelineError(
+                f"Stage '{spec.agent_stage}' 报告成功，但没有在 "
+                f"{spec.code_dir}/ 写出任何文件。\n"
+                f"  路径：{code_path}\n"
+                "  该阶段要求产出真实代码；只有 JSON 摘要不算完成。\n"
+                "  如果用 handoff 模式，请确认你在有文件写权限的 agent 里执行了 task.md，"
+                "且它把代码写到了上面这个目录。"
+            )
+        print(
+            f"   代码已写入 {spec.code_dir}/：{code_report['file_count']} 个文件，"
+            f"{code_report['bytes']} 字节"
         )
 
     abs_path, rel_path = _artifact_path(project_dir, spec, response.mode)
@@ -372,6 +441,7 @@ def execute_stage(
         "generated_at": utc_now(),
         "mode": response.mode,
         "is_real_data": response.is_real_data,
+        **({"code": code_report} if code_report else {}),
     }
     _append_audit(
         state,
