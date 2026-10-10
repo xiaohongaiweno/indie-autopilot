@@ -20,14 +20,14 @@ env:
   PROJECT_ID: ${{ github.event.inputs.project_id || format('opp-{0}', github.event.issue.number) }}
 
 jobs:
-  init-project:
-    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'opportunity')
+  pre-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
-      - name: Create project state from issue
+      - name: Initialize project from issue
+        if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'opportunity')
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
         with:
           script: |
@@ -67,8 +67,6 @@ jobs:
               JSON.stringify(state, null, 2) + '\n'
             );
 
-            core.exportVariable('PROJECT_ID', projectId);
-
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
         with:
           python-version: "3.12"
@@ -76,12 +74,14 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Validate project state
+        if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'opportunity')
         run: |
           python scripts/validate_artifact.py \
             --schema schemas/project.schema.json \
             --artifact "projects/${{ env.PROJECT_ID }}/state.json"
 
       - name: Commit project state
+        if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'opportunity')
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -89,7 +89,14 @@ jobs:
           git commit -m "Initialize project ${{ env.PROJECT_ID }} from issue #${{ github.event.issue.number }}" || echo "Nothing to commit"
           git push
 
+      - name: Check transition validity
+        run: |
+          python scripts/check_transition.py \
+            --project-dir "projects/${{ env.PROJECT_ID }}" \
+            --to-stage validating
+
       - name: Acknowledge issue
+        if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'opportunity')
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
         with:
           script: |
@@ -99,24 +106,6 @@ jobs:
               issue_number: context.issue.number,
               body: `Validation workflow started!\n\n- **Project ID**: \`opp-${context.issue.number}\`\n- **Workflow**: [View run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})\n\nI'll create an approval Issue when validation completes.`
             });
-
-  pre-check:
-    needs: init-project
-    if: always() && (needs.init-project.result == 'success' || needs.init-project.result == 'skipped')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
-        with:
-          python-version: "3.12"
-          cache: "pip"
-      - run: pip install -r requirements.txt
-      - name: Check transition validity
-        run: |
-          python scripts/check_transition.py \
-            --project-dir "projects/${{ env.PROJECT_ID }}" \
-            --to-stage validating
 
   validate:
     needs: pre-check
@@ -140,6 +129,13 @@ jobs:
           python scripts/validate_artifact.py \
             --schema schemas/stage-result.schema.json \
             --artifact "projects/${{ env.PROJECT_ID }}/research/mock-validation-result.json"
+      - name: Commit research artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "projects/${{ env.PROJECT_ID }}/research/"
+          git commit -m "Add validation research for ${{ env.PROJECT_ID }}" || echo "Nothing to commit"
+          git push
       - name: Create approval issue
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
         with:
@@ -152,6 +148,6 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Approval needed: Validate ${projectId}`,
-              body: `## Validation Results\n\nProject: ${projectId}\nSource: ${issueTitle}\n\nReview the research artifacts and approve or request changes.\n\n- [ ] Evidence is sufficient\n- [ ] Risks are acceptable\n- [ ] Next steps are clear\n\nRespond with /approve or /reject`,
+              body: `## Validation Results\n\nProject: ${projectId}\nSource: ${issueTitle}\n\nReview the research artifacts in \`projects/${projectId}/research/\` and approve or request changes.\n\n- [ ] Evidence is sufficient\n- [ ] Risks are acceptable\n- [ ] Next steps are clear\n\nRespond with /approve or /reject`,
               labels: ['approval', 'validation']
             });
